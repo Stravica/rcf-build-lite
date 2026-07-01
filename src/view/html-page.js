@@ -19,10 +19,12 @@ import {
 import { detailsWrap, escapeHtml } from './doc-renderers/helpers.js';
 import { allRequirementSubdiagrams, overviewDiagram } from './mermaid-diagram.js';
 
-// Inline SVG favicon. Kept under 500 bytes (~330 chars) - simple monogram in
-// the RCF palette. Delivered as a data URL so no separate file has to ship.
+// Inline SVG favicon: the Stravica monogram (terracotta rounded-square with
+// cream serif S), pinched from stravica.ai/assets/brand/logo-monogram.svg
+// so the review surface shares brand identity with the marketing site.
+// Delivered as a data URL so no separate file has to ship.
 const FAVICON_HREF =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231d4ed8'/%3E%3Ctext x='16' y='22' font-family='Arial' font-size='16' font-weight='700' fill='%23ffffff' text-anchor='middle'%3ER%3C/text%3E%3C/svg%3E";
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='64' fill='%23c14a3a'/%3E%3Ctext x='256' y='370' font-family='Georgia,serif' font-size='360' font-weight='600' text-anchor='middle' fill='%23f7f5f0'%3ES%3C/text%3E%3C/svg%3E";
 
 /**
  * Render the complete index.html string.
@@ -105,6 +107,7 @@ export function renderPage(model) {
   </main>
   <footer>
     <p>Generated from the on-disk RCF tree at <code>rcf/</code>. Read-only; regenerate with <code>rcf-view</code> to see fresh state.</p>
+    <p>Learn more about the Requirements Confidence Framework at <a href="https://stravica.ai/rcf-methodology" target="_blank" rel="noopener">stravica.ai/rcf-methodology</a>.</p>
   </footer>
   <script src="mermaid.min.js"></script>
   <script>${script}</script>
