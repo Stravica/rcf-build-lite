@@ -1,6 +1,9 @@
 // Per-document renderer tests. Each asserts on structural elements (anchors,
 // curated key fields, raw JSON disclosure) rather than full HTML snapshots
 // (per spec §9.5).
+//
+// Phase 3.2 anchor convention: raw doc-id (e.g. "REQ-001"), not the old
+// `doc-req-001` form. See helpers.js `anchorIdFor`.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,15 +30,15 @@ test('renderPrd emits a doc-prd article with the prd anchor', () => {
     },
     { raw: '{}' },
   );
-  assert.match(html, /id="doc-prd-001"/);
+  assert.match(html, /id="PRD-001"/);
   assert.match(html, /doc-prd/);
   assert.match(html, /Acme/);
-  assert.match(html, /href="#doc-req-001"/);
-  assert.match(html, /href="#doc-req-002"/);
+  assert.match(html, /href="#REQ-001"/);
+  assert.match(html, /href="#REQ-002"/);
   assert.match(html, /Show raw JSON/);
 });
 
-test('renderReq lists user stories and embeds subdiagram when supplied', () => {
+test('renderReq embeds subdiagram when supplied and does not list user stories inline', () => {
   const html = renderReq(
     {
       reqId: 'REQ-002',
@@ -47,17 +50,18 @@ test('renderReq lists user stories and embeds subdiagram when supplied', () => {
     },
     {
       raw: '{}',
-      userStories: [{ usId: 'US-201', title: 'Render' }],
       subdiagram: 'flowchart LR\n  REQ-002 --> US-201',
     },
   );
-  assert.match(html, /id="doc-req-002"/);
-  assert.match(html, /US-201 - Render/);
+  assert.match(html, /id="REQ-002"/);
   assert.match(html, /<pre class="mermaid">/);
   assert.match(html, /flowchart LR/);
+  // User stories are NOT listed by the REQ renderer in Phase 3.2 - they are
+  // nested as separate `<details>` in html-page.
+  assert.doesNotMatch(html, /User stories/);
 });
 
-test('renderUserStory renders Given / When / Then for each AC and links to delivering FBSs', () => {
+test('renderUserStory renders Given / When / Then per AC as list items with FBS coverage', () => {
   const fbsByAcId = new Map([['AC-201-1', [{ fbsId: 'FBS-003' }]]]);
   const html = renderUserStory(
     {
@@ -73,13 +77,31 @@ test('renderUserStory renders Given / When / Then for each AC and links to deliv
     },
     { raw: '{}', fbsByAcId },
   );
-  assert.match(html, /id="doc-us-201"/);
-  assert.match(html, /id="doc-ac-201-1"/);
+  assert.match(html, /id="US-201"/);
+  assert.match(html, /id="AC-201-1"/);
+  assert.match(html, /class="ac-item"/);
   assert.match(html, /Given/);
   assert.match(html, /When/);
   assert.match(html, /Then/);
-  assert.match(html, /href="#doc-fbs-003"/);
-  assert.match(html, /href="#doc-req-002"/);
+  assert.match(html, /Covered by/);
+  assert.match(html, /href="#FBS-003"/);
+  assert.match(html, /href="#REQ-002"/);
+});
+
+test('renderUserStory shows a not-yet-delivered note when no FBS covers an AC', () => {
+  const html = renderUserStory(
+    {
+      usId: 'US-999',
+      title: 'T',
+      asA: 'a',
+      iWant: 'i',
+      soThat: 's',
+      reqId: 'REQ-999',
+      acceptanceCriteria: [{ id: 'AC-999-1', description: 'd', testable: false }],
+    },
+    { raw: '{}', fbsByAcId: new Map() },
+  );
+  assert.match(html, /not yet delivered by any FBS/);
 });
 
 test('renderTad iterates architecturePrinciples and lists components and ADRs', () => {
@@ -101,12 +123,12 @@ test('renderTad iterates architecturePrinciples and lists components and ADRs', 
     },
     { raw: '{}' },
   );
-  assert.match(html, /id="doc-tad-001"/);
+  assert.match(html, /id="TAD-001"/);
   assert.match(html, /P1/);
   assert.match(html, /P2/);
-  assert.match(html, /href="#doc-tac-001"/);
-  assert.match(html, /href="#doc-tac-002"/);
-  assert.match(html, /href="#doc-adr-001"/);
+  assert.match(html, /href="#TAC-001"/);
+  assert.match(html, /href="#TAC-002"/);
+  assert.match(html, /href="#ADR-001"/);
 });
 
 test('renderTad renders optional sections present in the document', () => {
@@ -141,7 +163,7 @@ test('renderTac emits responsibilities and interfaces', () => {
     },
     { raw: '{}' },
   );
-  assert.match(html, /id="doc-tac-001"/);
+  assert.match(html, /id="TAC-001"/);
   assert.match(html, /r1/);
   assert.match(html, /loadDocument/);
   assert.match(html, /rcf-schemas/);
@@ -160,7 +182,7 @@ test('renderAdr emits context, decision and consequences', () => {
     },
     { raw: '{}' },
   );
-  assert.match(html, /id="doc-adr-001"/);
+  assert.match(html, /id="ADR-001"/);
   assert.match(html, /Context/);
   assert.match(html, /Decision/);
   assert.match(html, /Consequences/);
@@ -181,12 +203,12 @@ test('renderBuildSequence renders ordered FBS slots with links', () => {
     },
     { raw: '{}' },
   );
-  assert.match(html, /id="doc-bs-001"/);
-  assert.match(html, /href="#doc-fbs-001"/);
-  assert.match(html, /href="#doc-fbs-002"/);
+  assert.match(html, /id="BS-001"/);
+  assert.match(html, /href="#FBS-001"/);
+  assert.match(html, /href="#FBS-002"/);
 });
 
-test('renderFbs resolves AC ids into Given/When/Then text', () => {
+test('renderFbs resolves AC ids into Given/When/Then text and emits AC pills (D8)', () => {
   const usByAcId = new Map([['AC-201-1', {
     acceptanceCriteria: [{ id: 'AC-201-1', description: 'render', given: 'g', when: 'w', then: 't' }],
   }]]);
@@ -204,11 +226,13 @@ test('renderFbs resolves AC ids into Given/When/Then text', () => {
     },
     { raw: '{}', usByAcId },
   );
-  assert.match(html, /id="doc-fbs-003"/);
+  assert.match(html, /id="FBS-003"/);
   assert.match(html, /Given/);
-  assert.match(html, /href="#doc-tac-003"/);
-  assert.match(html, /href="#doc-adr-001"/);
-  assert.match(html, /href="#doc-fbs-002"/);
+  assert.match(html, /href="#TAC-003"/);
+  assert.match(html, /href="#ADR-001"/);
+  assert.match(html, /href="#FBS-002"/);
+  // Clickable AC pill.
+  assert.match(html, /class="ac-pill" href="#AC-201-1"/);
 });
 
 test('renderFbs marks an unresolved AC reference inline', () => {
@@ -228,8 +252,8 @@ test('renderTestSuite emits test cases as Given/When/Then blocks', () => {
     },
     { raw: '{}' },
   );
-  assert.match(html, /id="doc-ts-001"/);
+  assert.match(html, /id="TS-001"/);
   assert.match(html, /TC-001/);
   assert.match(html, /Given/);
-  assert.match(html, /href="#doc-ac-201-1"/);
+  assert.match(html, /href="#AC-201-1"/);
 });
