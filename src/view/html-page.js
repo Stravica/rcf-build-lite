@@ -266,7 +266,22 @@ function inlineScript() {
 
   function initMermaid() {
     if (typeof window.mermaid !== 'undefined') {
-      window.mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });
+      // startOnLoad: false. Mermaid can't lay out diagrams inside a
+      // display:none tabpanel (getBoundingClientRect is 0x0 -> NaN
+      // transforms). We run each tab's diagrams on activation instead;
+      // runMermaidIn is idempotent via the data-processed attribute.
+      window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+    }
+  }
+
+  function runMermaidIn(container) {
+    if (!container || typeof window.mermaid === 'undefined') return;
+    var pending = container.querySelectorAll('.mermaid:not([data-processed="true"])');
+    if (pending.length === 0) return;
+    try {
+      window.mermaid.run({ nodes: Array.prototype.slice.call(pending) });
+    } catch (e) {
+      // Mermaid.run may throw on init errors; do not block the UI.
     }
   }
 
@@ -287,8 +302,12 @@ function inlineScript() {
     TABS.forEach(function (t) {
       var p = panelFor(t);
       if (!p) return;
-      if (t === name) p.removeAttribute('hidden');
-      else p.setAttribute('hidden', '');
+      if (t === name) {
+        p.removeAttribute('hidden');
+        runMermaidIn(p);
+      } else {
+        p.setAttribute('hidden', '');
+      }
     });
     return true;
   }

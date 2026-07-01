@@ -99,6 +99,19 @@ test('inline script contains tab switching and hash routing logic (D5)', async (
   assert.match(html, /aria-selected/);
 });
 
+test('inline script lazy-renders Mermaid on tab activation (D3, hidden-tab NaN fix)', async () => {
+  // Mermaid cannot lay out diagrams inside display:none tabpanels
+  // (getBoundingClientRect returns 0x0, which produces
+  // "translate(undefined, NaN)" warnings in vendored Mermaid 11.6.0).
+  // The inline script must therefore initialise Mermaid with
+  // startOnLoad:false and run each tab's diagrams on activation.
+  const { html } = await renderLive();
+  assert.match(html, /startOnLoad:\s*false/);
+  assert.match(html, /function runMermaidIn/);
+  assert.match(html, /data-processed/);
+  assert.match(html, /window\.mermaid\.run\(\{ nodes:/);
+});
+
 test('overview diagram carries click bindings whose hrefs use raw doc ids', async () => {
   const { html } = await renderLive();
   assert.match(html, /click PRD-001 &quot;#PRD-001&quot;/);
