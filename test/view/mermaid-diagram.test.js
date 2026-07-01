@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { walkTree } from '../../src/store/index.js';
 import {
   allRequirementSubdiagrams,
-  masterDiagram,
+  overviewDiagram,
   requirementSubdiagram,
 } from '../../src/view/mermaid-diagram.js';
 import { buildTreeModel } from '../../src/view/tree-model.js';
@@ -14,57 +14,66 @@ import { buildTreeModel } from '../../src/view/tree-model.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..');
 
-test('masterDiagram begins with flowchart TD (AC-201-3)', async () => {
+test('overviewDiagram begins with flowchart LR (D3)', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
-  const src = masterDiagram(model);
-  assert.match(src, /^flowchart TD/);
+  const src = overviewDiagram(model);
+  assert.match(src, /^flowchart LR/);
 });
 
-test('masterDiagram contains the chain edges PRD -> REQ -> US (AC-201-1)', async () => {
+test('overviewDiagram wires PRD -> each REQ with a solid edge', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
-  const src = masterDiagram(model);
-  assert.match(src, /PRD-001 --> REQ-002/);
-  assert.match(src, /REQ-002 --> US-201/);
-  assert.match(src, /US-201 --> AC-201-1/);
+  const src = overviewDiagram(model);
+  for (const reqId of model.prd?.requirementIds ?? []) {
+    assert.match(src, new RegExp(`PRD-001 --> ${reqId}`));
+  }
 });
 
-test('masterDiagram contains TAD chain edges to TAC and ADR', async () => {
+test('overviewDiagram wires PRD -.-> TAD and PRD -.-> BS with dashed edges', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
-  const src = masterDiagram(model);
-  assert.match(src, /TAD-001 --> TAC-001/);
-  assert.match(src, /TAD-001 --> ADR-001/);
+  const src = overviewDiagram(model);
+  assert.match(src, /PRD-001 -\.-> TAD-001/);
+  assert.match(src, /PRD-001 -\.-> BS-001/);
 });
 
-test('masterDiagram emits FBS-to-AC dashed delivers edges', async () => {
+test('overviewDiagram carries ~10 nodes on the Phase 2 tree (not the full tree)', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
-  const src = masterDiagram(model);
-  assert.match(src, /FBS-003 -\.->\|delivers\| AC-201-1/);
+  const src = overviewDiagram(model);
+  // Count node declarations (lines like `  ID[...]`). Should be roughly:
+  // 1 PRD + N REQs + 1 TAD + 1 BS.
+  const nodeLines = src.split('\n').filter((l) => /^ {2}[A-Z]+-[\w-]+\[/.test(l));
+  const expected = 1 + model.requirements.length + (model.tad ? 1 : 0) + (model.bs ? 1 : 0);
+  assert.equal(nodeLines.length, expected);
+  // Ensure we did NOT emit US or AC or FBS nodes in the overview.
+  assert.doesNotMatch(src, /^ {2}US-\d+\[/m);
+  assert.doesNotMatch(src, /^ {2}AC-\d+/m);
+  assert.doesNotMatch(src, /^ {2}FBS-\d+\[/m);
 });
 
-test('masterDiagram defines node classes per document type', async () => {
+test('overviewDiagram defines node classes per document type', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
-  const src = masterDiagram(model);
+  const src = overviewDiagram(model);
   assert.match(src, /classDef prd/);
   assert.match(src, /classDef req/);
-  assert.match(src, /classDef us/);
-  assert.match(src, /classDef ac/);
-  assert.match(src, /classDef fbs/);
+  assert.match(src, /classDef tad/);
+  assert.match(src, /classDef bs/);
   assert.match(src, /classDef broken/);
 });
 
-test('masterDiagram emits click bindings for navigation to doc anchors', async () => {
+test('overviewDiagram emits click bindings to raw doc-id anchors (D7)', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
-  const src = masterDiagram(model);
-  assert.match(src, /click US-201 "#doc-us-201";/);
+  const src = overviewDiagram(model);
+  assert.match(src, /click PRD-001 "#PRD-001";/);
+  assert.match(src, /click REQ-002 "#REQ-002";/);
+  assert.match(src, /click TAD-001 "#TAD-001";/);
 });
 
-test('masterDiagram marks broken ids with the broken class (AC-201-2)', async () => {
+test('overviewDiagram marks broken ids with the broken class', async () => {
   const fakeTree = {
     manifest: { version: '2.0.0' },
     prd: { prdId: 'PRD-001', requirementIds: ['REQ-099'] },
@@ -81,8 +90,16 @@ test('masterDiagram marks broken ids with the broken class (AC-201-2)', async ()
     brokenIds: new Set(['REQ-099']),
   };
   const model = buildTreeModel({ tree: fakeTree, errors: [] });
-  const src = masterDiagram(model);
+  const src = overviewDiagram(model);
   assert.match(src, /class REQ-099 broken;/);
+});
+
+test('overviewDiagram is deterministic (D15)', async () => {
+  const result = await walkTree({ projectRoot: repoRoot });
+  const model = buildTreeModel(result);
+  const one = overviewDiagram(model);
+  const two = overviewDiagram(model);
+  assert.equal(one, two);
 });
 
 test('requirementSubdiagram uses flowchart LR orientation', async () => {
@@ -93,17 +110,26 @@ test('requirementSubdiagram uses flowchart LR orientation', async () => {
   assert.match(src, /^flowchart LR/);
 });
 
-test('requirementSubdiagram is a focused slice of the master', async () => {
+test('requirementSubdiagram carries chain edges and delivers back-links', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
   const req = model.requirements.find((r) => r.reqId === 'REQ-002');
   const src = requirementSubdiagram(model, req);
-  // Contains the REQ's stories and the FBSs that deliver its ACs.
   assert.match(src, /REQ-002 --> US-201/);
   assert.match(src, /US-201 --> AC-201-1/);
   assert.match(src, /FBS-003 -\.->\|delivers\| AC-201-1/);
   // Does NOT contain a different REQ's children.
   assert.doesNotMatch(src, /US-101/);
+});
+
+test('requirementSubdiagram emits click bindings for every node (D7)', async () => {
+  const result = await walkTree({ projectRoot: repoRoot });
+  const model = buildTreeModel(result);
+  const req = model.requirements.find((r) => r.reqId === 'REQ-002');
+  const src = requirementSubdiagram(model, req);
+  assert.match(src, /click REQ-002 "#REQ-002";/);
+  assert.match(src, /click US-201 "#US-201";/);
+  assert.match(src, /click AC-201-1 "#AC-201-1";/);
 });
 
 test('allRequirementSubdiagrams returns one diagram per REQ', async () => {
@@ -114,12 +140,4 @@ test('allRequirementSubdiagrams returns one diagram per REQ', async () => {
   for (const req of model.requirements) {
     assert.ok(all.has(req.reqId));
   }
-});
-
-test('masterDiagram is deterministic (D15 sorted ids)', async () => {
-  const result = await walkTree({ projectRoot: repoRoot });
-  const model = buildTreeModel(result);
-  const one = masterDiagram(model);
-  const two = masterDiagram(model);
-  assert.equal(one, two);
 });
