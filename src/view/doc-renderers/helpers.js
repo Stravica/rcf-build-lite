@@ -19,13 +19,15 @@ export function escapeHtml(value) {
 }
 
 /**
- * Lower-case id for use in anchor hrefs.
+ * Return the raw document id as an anchor id. Phase 3.2 unified the anchor
+ * convention around the display id (e.g. "REQ-002") so Mermaid click targets
+ * and internal doc links resolve to the same DOM node.
  *
  * @param {string} id
  * @returns {string}
  */
 export function anchorIdFor(id) {
-  return `doc-${String(id).toLowerCase()}`;
+  return String(id);
 }
 
 /**
@@ -120,4 +122,24 @@ export function brokenReferenceSection(id) {
     <p>Referenced by a parent document but no file was found at the expected path.</p>
   </aside>
 </article>`.trim();
+}
+
+/**
+ * Wrap a doc's rendered body in a `<details data-doc-id>` so it can be
+ * drilled-in from the tab tree. Closed by default. The `data-doc-id`
+ * attribute is what the hash-routing script targets.
+ *
+ * @param {object} args
+ * @param {string} args.id - display doc id (e.g. "REQ-001")
+ * @param {string} args.summary - short label shown in the summary line
+ * @param {string} args.className - class applied to the details wrapper
+ * @param {string} args.body - the rendered body HTML
+ * @returns {string}
+ */
+export function detailsWrap({ id, summary, className, body }) {
+  return `
+<details class="doc-details ${className}" data-doc-id="${escapeHtml(id)}">
+  <summary>${escapeHtml(summary)}</summary>
+  ${body}
+</details>`.trim();
 }

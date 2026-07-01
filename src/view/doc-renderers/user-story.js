@@ -1,4 +1,7 @@
-// User story renderer. ACs are rendered inline with Given/When/Then.
+// User story renderer. ACs are rendered inline as list items so an AC can
+// be a top-level scroll anchor (per Phase 3.2 D4) without wrapping each in
+// its own `<section>`. Each AC line links back to the FBS or FBSs that
+// deliver it via `fbsByAcId` (D8).
 
 import {
   anchorIdFor,
@@ -21,7 +24,7 @@ export function renderUserStory(us, ctx) {
   if (!us) return '';
   const anchor = anchorIdFor(us.usId ?? 'US');
   const broken = ctx.errors?.length ? brokenBanner(ctx.errors) : '';
-  const acBlocks = (us.acceptanceCriteria ?? []).map((ac) => renderAc(ac, ctx)).join('\n');
+  const acItems = (us.acceptanceCriteria ?? []).map((ac) => renderAcItem(ac, ctx)).join('\n');
   return `
 <article id="${anchor}" class="doc doc-us">
   <h3>${escapeHtml(us.usId ?? 'US')} - ${escapeHtml(us.title ?? '')}</h3>
@@ -33,25 +36,28 @@ export function renderUserStory(us, ctx) {
   <section class="field-list"><h4>Requirement</h4><p>${docLink(us.reqId)}</p></section>
   <section class="acceptance-criteria">
     <h4>Acceptance criteria</h4>
-    ${acBlocks}
+    <ul class="ac-list">
+      ${acItems}
+    </ul>
   </section>
   ${rawJsonDisclosure(ctx.raw, us)}
 </article>`.trim();
 }
 
-function renderAc(ac, ctx) {
-  const acAnchor = anchorIdFor(ac.id ?? 'AC');
-  const fbsList = ctx.fbsByAcId?.get(ac.id) ?? [];
-  const fbsLinks = fbsList.length === 0
+function renderAcItem(ac, ctx) {
+  const acId = ac.id ?? 'AC';
+  const acAnchor = anchorIdFor(acId);
+  const fbsList = ctx.fbsByAcId?.get(acId) ?? [];
+  const coveredBy = fbsList.length === 0
     ? '<em>not yet delivered by any FBS</em>'
-    : fbsList.map((f) => docLink(f.fbsId)).join(', ');
-  return `
-<section class="ac" id="${acAnchor}">
-  <h5>${escapeHtml(ac.id ?? 'AC')}</h5>
-  <p>${escapeHtml(ac.description ?? '')}</p>
-  ${ac.given ? `<p><strong>Given</strong> ${escapeHtml(ac.given)}</p>` : ''}
-  ${ac.when ? `<p><strong>When</strong> ${escapeHtml(ac.when)}</p>` : ''}
-  ${ac.then ? `<p><strong>Then</strong> ${escapeHtml(ac.then)}</p>` : ''}
-  <p class="ac-meta"><strong>Testable:</strong> ${escapeHtml(String(ac.testable ?? false))} - <strong>Delivered by:</strong> ${fbsLinks}</p>
-</section>`.trim();
+    : `Covered by ${fbsList.map((f) => docLink(f.fbsId)).join(', ')}`;
+  const parts = [];
+  parts.push(`<strong>${escapeHtml(acId)}</strong> - ${escapeHtml(ac.description ?? '')}`);
+  const gwt = [];
+  if (ac.given) gwt.push(`<em>Given</em> ${escapeHtml(ac.given)}`);
+  if (ac.when) gwt.push(`<em>When</em> ${escapeHtml(ac.when)}`);
+  if (ac.then) gwt.push(`<em>Then</em> ${escapeHtml(ac.then)}`);
+  if (gwt.length > 0) parts.push(`<div class="ac-gwt">${gwt.map((p) => `<p>${p}</p>`).join('')}</div>`);
+  parts.push(`<p class="ac-meta"><strong>Testable:</strong> ${escapeHtml(String(ac.testable ?? false))} - ${coveredBy}</p>`);
+  return `<li id="${acAnchor}" class="ac-item">${parts.join('\n')}</li>`;
 }

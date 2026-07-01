@@ -5,6 +5,7 @@ import {
   anchorIdFor,
   brokenBanner,
   brokenReferenceSection,
+  detailsWrap,
   docLink,
   docLinkList,
   escapeHtml,
@@ -23,14 +24,15 @@ test('escapeHtml renders null and undefined as empty', () => {
   assert.equal(escapeHtml(undefined), '');
 });
 
-test('anchorIdFor lowercases the id', () => {
-  assert.equal(anchorIdFor('REQ-002'), 'doc-req-002');
-  assert.equal(anchorIdFor('US-201'), 'doc-us-201');
+test('anchorIdFor returns the raw doc id (Phase 3.2 D5)', () => {
+  assert.equal(anchorIdFor('REQ-002'), 'REQ-002');
+  assert.equal(anchorIdFor('US-201'), 'US-201');
+  assert.equal(anchorIdFor('AC-201-1'), 'AC-201-1');
 });
 
-test('docLink renders the expected anchor', () => {
-  assert.equal(docLink('REQ-002'), '<a href="#doc-req-002">REQ-002</a>');
-  assert.equal(docLink('US-201', 'Story'), '<a href="#doc-us-201">Story</a>');
+test('docLink renders an anchor to the raw id', () => {
+  assert.equal(docLink('REQ-002'), '<a href="#REQ-002">REQ-002</a>');
+  assert.equal(docLink('US-201', 'Story'), '<a href="#US-201">Story</a>');
 });
 
 test('docLinkList renders comma-separated links', () => {
@@ -87,6 +89,20 @@ test('brokenBanner contains aside with role=alert', () => {
 
 test('brokenReferenceSection renders a stand-alone broken article', () => {
   const out = brokenReferenceSection('REQ-099');
-  assert.match(out, /id="doc-req-099"/);
+  assert.match(out, /id="REQ-099"/);
   assert.match(out, /broken reference/);
+});
+
+test('detailsWrap emits a data-doc-id details block with summary and body', () => {
+  const out = detailsWrap({ id: 'REQ-001', summary: 'REQ-001 - Title', className: 'doc-req-wrap', body: '<p>b</p>' });
+  assert.match(out, /^<details/);
+  assert.match(out, /data-doc-id="REQ-001"/);
+  assert.match(out, /class="doc-details doc-req-wrap"/);
+  assert.match(out, /<summary>REQ-001 - Title<\/summary>/);
+  assert.match(out, /<p>b<\/p>/);
+});
+
+test('detailsWrap escapes the summary text', () => {
+  const out = detailsWrap({ id: 'X', summary: '<b>xss</b>', className: 'x', body: '' });
+  assert.match(out, /<summary>&lt;b&gt;xss&lt;\/b&gt;<\/summary>/);
 });

@@ -1,5 +1,7 @@
-// Mermaid diagram emission. Builds the master `flowchart TD` covering the
-// whole RCF tree, and one focused `flowchart LR` per requirement.
+// Mermaid diagram emission. Phase 3.2 replaces the exhaustive master
+// diagram with a lightweight overview (PRD -> REQ family + TAD + BS) and
+// keeps the per-requirement subdiagrams for drill-down. Click bindings on
+// every diagram anchor into the hash-routed doc DOM (D5, D7).
 //
 // Node classes match the CSS palette in style.css. Broken nodes carry the
 // `broken` class (dashed border, distinct colour). FBS-to-AC edges are
@@ -75,7 +77,7 @@ const CLASS_DEFS = `
 `.trim();
 
 function emitClick(id) {
-  return `  click ${nodeId(id)} "#doc-${id.toLowerCase()}";`;
+  return `  click ${nodeId(id)} "#${id}";`;
 }
 
 function emitClassAssignments(ids, model) {
@@ -93,14 +95,16 @@ function emitClassAssignments(ids, model) {
 }
 
 /**
- * Build the master diagram (`flowchart TD`) covering the whole tree.
+ * Build the overview diagram (`flowchart LR`): PRD -> each REQ (solid),
+ * PRD -.-> TAD, PRD -.-> BS (dashed). ~10 nodes on the Phase 2 tree; the
+ * whole point is a single-screen navigation surface (D3).
  *
  * @param {import('./tree-model.js').BuiltTreeModel} model
  * @returns {string}
  */
-export function masterDiagram(model) {
+export function overviewDiagram(model) {
   /** @type {string[]} */
-  const lines = ['flowchart TD'];
+  const lines = ['flowchart LR'];
   /** @type {Set<string>} */
   const declared = new Set();
   /** @type {Set<string>} */
@@ -113,7 +117,7 @@ export function masterDiagram(model) {
     lines.push(`  ${nodeId(id)}[${nodeLabel(id, model)}]`);
   };
 
-  // PRD -> REQs
+  // PRD -> REQs (solid).
   if (model.prd?.prdId) {
     declare(model.prd.prdId);
     for (const reqId of model.prd.requirementIds ?? []) {
@@ -122,67 +126,20 @@ export function masterDiagram(model) {
     }
   }
 
-  // REQ -> USs
-  for (const us of model.userStories) {
-    if (!us.usId) continue;
-    declare(us.usId);
-    if (us.reqId) {
-      declare(us.reqId);
-      lines.push(`  ${nodeId(us.reqId)} --> ${nodeId(us.usId)}`);
-    }
-    // US -> ACs
-    for (const ac of us.acceptanceCriteria ?? []) {
-      declare(ac.id);
-      lines.push(`  ${nodeId(us.usId)} --> ${nodeId(ac.id)}`);
-    }
-  }
-
-  // TAD -> TACs / ADRs
-  if (model.tad?.tadId) {
+  // PRD -.-> TAD (dashed - different relationship).
+  if (model.prd?.prdId && model.tad?.tadId) {
     declare(model.tad.tadId);
-    for (const id of model.tad.componentIds ?? []) {
-      declare(id);
-      lines.push(`  ${nodeId(model.tad.tadId)} --> ${nodeId(id)}`);
-    }
-    for (const id of model.tad.architecturalDecisionIds ?? []) {
-      declare(id);
-      lines.push(`  ${nodeId(model.tad.tadId)} --> ${nodeId(id)}`);
-    }
+    lines.push(`  ${nodeId(model.prd.prdId)} -.-> ${nodeId(model.tad.tadId)}`);
+  } else if (model.tad?.tadId) {
+    declare(model.tad.tadId);
   }
 
-  // BS -> FBS (ordered)
-  if (model.bs?.bsId) {
+  // PRD -.-> BS (dashed).
+  if (model.prd?.prdId && model.bs?.bsId) {
     declare(model.bs.bsId);
-    const slots = Array.isArray(model.bs.fbs) ? [...model.bs.fbs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : [];
-    for (const slot of slots) {
-      declare(slot.fbsId);
-      lines.push(`  ${nodeId(model.bs.bsId)} -->|${slot.order ?? '?'}| ${nodeId(slot.fbsId)}`);
-    }
-  }
-
-  // FBS -> AC (delivers; dashed)
-  // FBS -> TAC / ADR (context; dotted)
-  // FBS -> FBS (depends on; dotted-thick)
-  for (const f of model.fbsItems) {
-    if (!f.fbsId) continue;
-    declare(f.fbsId);
-    for (const acId of f.acIds ?? []) {
-      declare(acId);
-      lines.push(`  ${nodeId(f.fbsId)} -.->|delivers| ${nodeId(acId)}`);
-    }
-    const ctx = f.contextRequirements ?? {};
-    for (const tacId of ctx.tacIds ?? []) {
-      declare(tacId);
-      lines.push(`  ${nodeId(f.fbsId)} -.->|context| ${nodeId(tacId)}`);
-    }
-    for (const adrId of ctx.adrIds ?? []) {
-      declare(adrId);
-      lines.push(`  ${nodeId(f.fbsId)} -.->|context| ${nodeId(adrId)}`);
-    }
-    for (const dep of f.dependencies ?? []) {
-      declare(dep);
-      lines.push(`  ${nodeId(f.fbsId)} ==>|depends on| ${nodeId(dep)}`);
-    }
+    lines.push(`  ${nodeId(model.prd.prdId)} -.-> ${nodeId(model.bs.bsId)}`);
+  } else if (model.bs?.bsId) {
+    declare(model.bs.bsId);
   }
 
   // Click bindings.

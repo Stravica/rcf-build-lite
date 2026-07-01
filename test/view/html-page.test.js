@@ -20,33 +20,48 @@ test('renderPage emits a valid HTML5 document (AC-202-1)', async () => {
   assert.match(html, /<\/html>\s*$/);
 });
 
-test('renderPage includes the master Mermaid block and per-REQ subdiagrams', async () => {
+test('renderPage includes the overview Mermaid block and per-REQ subdiagrams', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
   const html = renderPage(model);
-  // 1 master + N per-REQ subdiagrams (one per requirement).
-  const blocks = html.match(/class="mermaid"/g) ?? [];
+  // 1 overview + N per-REQ subdiagrams (one per requirement).
+  const blocks = html.match(/class="mermaid[^"]*"/g) ?? [];
   assert.equal(blocks.length, 1 + model.requirements.length);
 });
 
-test('renderPage carries an anchor per document section (AC-202-3 via D12)', async () => {
+test('renderPage carries an anchor per document via data-doc-id or id', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
   const html = renderPage(model);
   for (const id of ['PRD-001', 'REQ-002', 'US-201', 'TAD-001', 'TAC-001', 'ADR-001', 'BS-001', 'FBS-003']) {
-    const anchor = `id="doc-${id.toLowerCase()}"`;
-    assert.ok(html.includes(anchor), `missing anchor for ${id}`);
+    assert.ok(
+      html.includes(`data-doc-id="${id}"`) || html.includes(`id="${id}"`),
+      `missing anchor for ${id}`,
+    );
   }
 });
 
-test('renderPage table-of-contents links match top-level section ids', async () => {
+test('renderPage emits a four-tab layout (D1, D2)', async () => {
   const result = await walkTree({ projectRoot: repoRoot });
   const model = buildTreeModel(result);
   const html = renderPage(model);
-  for (const id of ['diagram', 'prd', 'requirements', 'user-stories', 'architecture', 'build']) {
-    assert.match(html, new RegExp(`href="#${id}"`));
-    assert.match(html, new RegExp(`id="${id}"`));
+  for (const name of ['overview', 'requirements', 'architecture', 'build']) {
+    assert.match(html, new RegExp(`data-tab="${name}"`));
+    assert.match(html, new RegExp(`id="tab-${name}"`));
   }
+  assert.match(html, /role="tablist"/);
+  const tabpanels = html.match(/<section id="tab-\w+" role="tabpanel"/g) ?? [];
+  assert.equal(tabpanels.length, 4);
+});
+
+test('renderPage marks non-Overview tabpanels hidden and Overview default (D12)', async () => {
+  const result = await walkTree({ projectRoot: repoRoot });
+  const model = buildTreeModel(result);
+  const html = renderPage(model);
+  assert.match(html, /id="tab-overview"[^>]*role="tabpanel"(?![^>]*hidden)/);
+  assert.match(html, /id="tab-requirements"[^>]*role="tabpanel"[^>]*hidden/);
+  assert.match(html, /id="tab-architecture"[^>]*role="tabpanel"[^>]*hidden/);
+  assert.match(html, /id="tab-build"[^>]*role="tabpanel"[^>]*hidden/);
 });
 
 test('renderPage references mermaid.min.js as a relative script tag (AC-202-1)', async () => {
@@ -54,6 +69,22 @@ test('renderPage references mermaid.min.js as a relative script tag (AC-202-1)',
   const model = buildTreeModel(result);
   const html = renderPage(model);
   assert.match(html, /<script src="mermaid.min.js"/);
+});
+
+test('renderPage emits an inline client-side script with tabs and hashchange (D5)', async () => {
+  const result = await walkTree({ projectRoot: repoRoot });
+  const model = buildTreeModel(result);
+  const html = renderPage(model);
+  assert.match(html, /hashchange/);
+  assert.match(html, /role="tab"/);
+  assert.match(html, /mermaid\.initialize/);
+});
+
+test('renderPage embeds an inline SVG favicon (D11)', async () => {
+  const result = await walkTree({ projectRoot: repoRoot });
+  const model = buildTreeModel(result);
+  const html = renderPage(model);
+  assert.match(html, /<link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml,/);
 });
 
 test('renderPage renders curated key fields, not raw JSON (AC-202-2)', async () => {
@@ -66,6 +97,15 @@ test('renderPage renders curated key fields, not raw JSON (AC-202-2)', async () 
   // Raw JSON disclosure is collapsed by default.
   assert.match(html, /<details/);
   assert.match(html, /Show raw JSON/);
+});
+
+test('renderPage wraps requirements in doc-details drill-down (D4)', async () => {
+  const result = await walkTree({ projectRoot: repoRoot });
+  const model = buildTreeModel(result);
+  const html = renderPage(model);
+  // At least one REQ wrapped as details, and USs nested inside as details.
+  assert.match(html, /<details[^>]*data-doc-id="REQ-002"/);
+  assert.match(html, /<details[^>]*data-doc-id="US-201"/);
 });
 
 test('renderPage carries a tree-errors banner when errors are present', async () => {

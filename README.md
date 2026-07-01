@@ -39,7 +39,7 @@ Output lands at `<project-root>/.rcf-view/`:
 - `style.css` - the stylesheet
 - `mermaid.min.js` - the vendored client-side renderer
 
-Open `.rcf-view/index.html` in a browser; no server required.
+Open `.rcf-view/index.html` in a browser; no server required. On a TTY run (with `CI` unset), the bin auto-launches the platform default browser at the rendered page. Pass `--no-open` to suppress.
 
 The default mode renders broken trees with visible markers (broken nodes in the diagram, broken-document banners in the page) and exits `3`. Pass `--strict` to refuse the render on tree errors. Exit code `3` is set in both modes when the tree is broken; only output presence differs.
 
@@ -48,6 +48,7 @@ The default mode renders broken trees with visible markers (broken nodes in the 
 | Flag | Default | Effect |
 |---|---|---|
 | `--strict` | off | Refuse to write output on a broken tree. Exit code is still `3`. |
+| `--no-open` | off | Do not open the rendered page in a browser. Auto-open runs by default when stdout is a TTY and `CI` is unset. |
 | `--quiet` | off | Suppress non-error stdout. |
 | `--verbose` | off | Per-document and per-output-file log lines on stdout. |
 | `--help` | off | Print the help and exit `0`. |

@@ -1,6 +1,8 @@
 // FBS renderer. Resolves AC ids into their Given/When/Then text rather
 // than rendering just the id, so an owner reviewing an FBS section can read
-// what each AC requires without jumping back to the US section.
+// what each AC requires without jumping back to the User stories area.
+// Phase 3.2: `acIds` are also rendered as clickable pills at the top so the
+// operator can jump directly across into Requirements-tab context (D8).
 
 import {
   anchorIdFor,
@@ -25,6 +27,7 @@ export function renderFbs(fbs, ctx) {
   if (!fbs) return '';
   const anchor = anchorIdFor(fbs.fbsId ?? 'FBS');
   const broken = ctx.errors?.length ? brokenBanner(ctx.errors) : '';
+  const acPills = renderAcPills(fbs.acIds ?? []);
   const acBlocks = (fbs.acIds ?? []).map((acId) => renderResolvedAc(acId, ctx)).join('\n');
   const ctxReq = fbs.contextRequirements ?? {};
   const ctxBlocks = renderContextRequirements(ctxReq);
@@ -34,6 +37,7 @@ export function renderFbs(fbs, ctx) {
   ${broken}
   ${fieldPara('Summary', fbs.summary)}
   ${fieldPara('Approach', fbs.approach)}
+  ${acPills}
   <section class="field-list"><h4>Acceptance criteria delivered</h4>${acBlocks}</section>
   ${ctxBlocks}
   ${fbs.dependencies?.length ? `<section class="field-list"><h4>Depends on</h4><p>${docLinkList(fbs.dependencies)}</p></section>` : ''}
@@ -45,6 +49,12 @@ export function renderFbs(fbs, ctx) {
   ${fieldPara('Notes', fbs.notes)}
   ${rawJsonDisclosure(ctx.raw, fbs)}
 </article>`.trim();
+}
+
+function renderAcPills(acIds) {
+  if (!Array.isArray(acIds) || acIds.length === 0) return '';
+  const pills = acIds.map((id) => `<a class="ac-pill" href="#${escapeHtml(id)}">${escapeHtml(id)}</a>`).join('');
+  return `<div class="ac-pills">${pills}</div>`;
 }
 
 function renderResolvedAc(acId, ctx) {
