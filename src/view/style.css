@@ -301,13 +301,17 @@ article.doc h5 { margin: 0.6rem 0 0.3rem; font-size: 0.925rem; font-weight: 600;
 .ac-list { list-style: none; padding-left: 0; margin: 0; }
 
 .ac-list .ac-item {
-  background: var(--colour-bg);
-  border: 1px solid var(--colour-border);
-  border-left: 4px solid var(--colour-ac);
-  border-radius: var(--radius-sm);
-  padding: 0.8rem 1.1rem;
-  margin-bottom: 0.6rem;
-  box-shadow: var(--shadow-sm);
+  background: transparent;
+  border: none;
+  border-left: 3px solid var(--colour-ac);
+  border-radius: 0;
+  padding: 0.5rem 0.9rem;
+  margin-bottom: 0.5rem;
+  box-shadow: none;
+}
+
+.ac-list .ac-item:last-child {
+  margin-bottom: 0;
 }
 
 .ac-list .ac-item p { margin: 0.3rem 0; }
@@ -342,23 +346,25 @@ article.doc h5 { margin: 0.6rem 0 0.3rem; font-size: 0.925rem; font-weight: 600;
 }
 
 .ac-resolved {
-  background: var(--colour-bg);
-  border: 1px solid var(--colour-border);
-  border-radius: var(--radius-sm);
-  padding: 0.6rem 0.85rem;
+  background: transparent;
+  border: none;
+  border-left: 3px solid var(--colour-ac);
+  border-radius: 0;
+  padding: 0.5rem 0.9rem;
   margin-bottom: 0.5rem;
 }
 
 .ac-resolved.broken {
+  border-left-color: var(--colour-broken-border);
   background: var(--colour-broken-bg);
-  border-color: var(--colour-broken-border);
 }
 
 .tc {
-  background: var(--colour-bg);
-  border: 1px solid var(--colour-border);
-  border-radius: var(--radius-sm);
-  padding: 0.6rem 0.85rem;
+  background: transparent;
+  border: none;
+  border-left: 3px solid var(--colour-ac);
+  border-radius: 0;
+  padding: 0.5rem 0.9rem;
   margin-bottom: 0.5rem;
 }
 
@@ -486,6 +492,55 @@ details.doc-details.doc-ts-wrap  { border-left: 4px solid var(--colour-ac); }
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* --------------------------------------------------------------------
+ * Nested details: strip the outer-card treatment so a REQ card
+ * expanded to show its US children doesn't render "card inside card
+ * inside card". Keep the coloured left accent so hierarchy is still
+ * visible, drop border/radius/shadow/background on the other sides.
+ * -------------------------------------------------------------------- */
+
+details.doc-details details.doc-details {
+  border-top-color: transparent;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  margin-bottom: 0.4rem;
+}
+
+details.doc-details details.doc-details:hover,
+details.doc-details details.doc-details[open] {
+  box-shadow: none;
+}
+
+details.doc-details details.doc-details:hover {
+  border-top-color: transparent;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+
+details.doc-details details.doc-details > summary {
+  padding: 0.5rem 0.85rem;
+  border-radius: 0;
+}
+
+details.doc-details details.doc-details > summary:hover {
+  background: var(--colour-surface);
+}
+
+details.doc-details details.doc-details[open] > summary {
+  border-bottom: 1px dashed var(--colour-border);
+  border-radius: 0;
+}
+
+details.doc-details details.doc-details > article,
+details.doc-details details.doc-details > section,
+details.doc-details details.doc-details > .req-body,
+details.doc-details details.doc-details > .us-body {
+  padding: 0.5rem 0.85rem 0.75rem;
 }
 
 /* Raw-JSON disclosure (dev-facing, quiet) */
