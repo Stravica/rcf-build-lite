@@ -42,10 +42,12 @@ test('renderView against the live tree writes the expected file set', async () =
   assert.ok(mermaidStat.size > 1_000_000);
 });
 
-test('rendered index.html carries an anchor for every document in the live tree', async () => {
+test('rendered index.html carries a hash anchor for every document in the live tree', async () => {
   await renderView({ projectRoot: repoRoot });
   const html = await readFile(join(repoRoot, '.rcf-view', 'index.html'), 'utf8');
-  // Phase 2 tree carries these well-known ids; renderer must surface them.
+  // Phase 2 tree carries these well-known ids; renderer must surface them
+  // either as an `id="ID"` or a `data-doc-id="ID"` (the two anchor
+  // conventions Phase 3.2 uses for hash routing).
   for (const id of [
     'PRD-001',
     'REQ-001', 'REQ-002', 'REQ-003', 'REQ-004', 'REQ-005', 'REQ-006', 'REQ-007',
@@ -55,14 +57,20 @@ test('rendered index.html carries an anchor for every document in the live tree'
     'BS-001',
     'FBS-001', 'FBS-003', 'FBS-012',
   ]) {
-    assert.ok(html.includes(`id="doc-${id.toLowerCase()}"`), `missing anchor for ${id}`);
+    const found = html.includes(`id="${id}"`) || html.includes(`data-doc-id="${id}"`);
+    assert.ok(found, `missing anchor for ${id}`);
   }
 });
 
-test('rendered diagram contains the chain edges from the live tree', async () => {
+test('rendered overview diagram contains the PRD->REQ chain from the live tree', async () => {
   await renderView({ projectRoot: repoRoot });
   const html = await readFile(join(repoRoot, '.rcf-view', 'index.html'), 'utf8');
   assert.match(html, /PRD-001 --&gt; REQ-002/);
-  assert.match(html, /REQ-002 --&gt; US-201/);
+  assert.match(html, /PRD-001 -\.-&gt; TAD-001/);
+});
+
+test('rendered per-REQ subdiagrams contain FBS -> AC delivers edges', async () => {
+  await renderView({ projectRoot: repoRoot });
+  const html = await readFile(join(repoRoot, '.rcf-view', 'index.html'), 'utf8');
   assert.match(html, /FBS-003 -\.-&gt;\|delivers\| AC-201-1/);
 });
