@@ -159,19 +159,25 @@ test('SSE emits walker-error on a broken tree (D17)', async () => {
       const first = await stream.next();
       assert.equal(first.event, 'tree-update');
       // A walker-error was broadcast on the initial walk too; a fresh
-      // subscriber only sees future events, so trigger another walk.
+      // subscriber only sees future events, so trigger another walk
+      // and consume events until a walker-error surfaces.
       await srv.rewalk();
-      // Collect the next few events; expect one walker-error.
       const seen = [];
-      for (let i = 0; i < 3; i += 1) {
-        // eslint-disable-next-line no-await-in-loop
-        seen.push(await stream.next());
+      let errEv = null;
+      for (let i = 0; i < 4; i += 1) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const ev = await stream.next(1500);
+          seen.push(ev);
+          if (ev.event === 'walker-error') { errEv = ev; break; }
+        } catch (e) {
+          break;
+        }
       }
       assert.ok(
-        seen.some((e) => e.event === 'walker-error'),
+        errEv,
         `expected a walker-error event; got ${seen.map((e) => e.event).join(', ')}`,
       );
-      const errEv = seen.find((e) => e.event === 'walker-error');
       const payload = JSON.parse(errEv.data);
       assert.ok(Array.isArray(payload.errors));
       assert.ok(payload.errors.length > 0);
