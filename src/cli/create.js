@@ -5,7 +5,7 @@
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 
-import { formatErrors } from '../errors/index.js';
+import { formatErrors, writeUnexpectedFailure } from '../errors/index.js';
 import { createDocument, deriveSlug, walkTree } from '../store/index.js';
 import { findProjectRoot } from '../view/index.js';
 
@@ -35,6 +35,10 @@ See 'rcf help create' for the full option list.
 `;
 
 const VALID_KINDS = new Set(['req', 'us', 'ac', 'tac', 'adr', 'fbs', 'ts', 'tc']);
+// Root-singleton kinds: created by `rcf init`, not by `rcf create`. When
+// a user reaches for `rcf create prd|tad|bs|manifest`, we return a clearer
+// message that points them at `rcf init` (BUG-010).
+const SINGLETON_KINDS = new Set(['prd', 'tad', 'bs', 'manifest']);
 
 /**
  * @param {string[]} argv - argv slice after `create`
@@ -57,12 +61,33 @@ export async function main(argv, deps = {}) {
   const flags = parsed.values;
   const positionals = parsed.positionals;
   if (flags.help) { stdout.write(HELP); return 0; }
-  if (positionals.length !== 1 || !VALID_KINDS.has(positionals[0])) {
-    stderr.write("[error] usage create: expected exactly one <kind> from req|us|ac|tac|adr|fbs|ts|tc\n");
+  // BUG-009 fix: split the two distinct usage errors so the operator can
+  // tell "kind missing" apart from "kind unknown". BUG-010 fix: singleton
+  // kinds (prd / tad / bs / manifest) get a clarifying "use rcf init"
+  // hint rather than the generic "unknown kind" line.
+  if (positionals.length === 0) {
+    stderr.write('[error] usage create: <kind> is required (one of req|us|ac|tac|adr|fbs|ts|tc)\n');
     stderr.write(HELP);
     return 2;
   }
-  const kind = positionals[0];
+  if (positionals.length > 1) {
+    stderr.write(`[error] usage create: expected exactly one <kind>, got ${positionals.length}\n`);
+    stderr.write(HELP);
+    return 2;
+  }
+  const rawKind = positionals[0];
+  if (SINGLETON_KINDS.has(rawKind)) {
+    stderr.write(`[error] usage create: ${rawKind} is a root singleton — use \`rcf init\` to create it\n`);
+    return 2;
+  }
+  if (!VALID_KINDS.has(rawKind)) {
+    stderr.write(
+      `[error] usage create: unknown kind: ${rawKind} (expected one of req|us|ac|tac|adr|fbs|ts|tc)\n`,
+    );
+    stderr.write(HELP);
+    return 2;
+  }
+  const kind = rawKind;
 
   const projectRoot = await findProjectRoot(cwd);
   if (!projectRoot) {
@@ -173,10 +198,15 @@ function isRcfError(value) {
 
 function handleWriterError(err, stderr) {
   const kind = err.kind;
+  // BUG-007 fix: spec §D15 mandates exit-1 emit
+  // `[rcf] unexpected failure: <msg>\n<stack>` — even under --quiet.
+  if (kind === 'ioFailure') {
+    writeUnexpectedFailure(err, stderr);
+    return 1;
+  }
   stderr.write(`[error] ${kind} ${err.message}\n`);
   if (kind === 'usage') return 2;
   if (kind === 'validation' || kind === 'brokenReference') return 3;
   if (kind === 'missingFile' || kind === 'parseFailure') return 2;
-  if (kind === 'ioFailure') return 1;
   return 1;
 }

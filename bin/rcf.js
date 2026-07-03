@@ -8,6 +8,7 @@
 // handler (`src/cli/<subcommand>.js`). Global `--version` and `--help`
 // short-circuit before dispatch.
 
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import process from 'node:process';
@@ -83,7 +84,36 @@ async function readPackageVersion() {
   }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+/**
+ * Compare `import.meta.url` to `process.argv[1]` in a symlink-safe way.
+ * On macOS `/tmp` is a symlink to `/private/tmp`, and any `npm link` /
+ * `pnpm link` install exposes the bin via a symlink. `import.meta.url`
+ * always resolves via realpath; `process.argv[1]` is the raw string the
+ * shell/OS passed. Normalise both via `fs.realpathSync` before compare.
+ * Falls back to the raw compare if realpath fails (e.g. path removed).
+ *
+ * @param {string} metaUrl - `import.meta.url`
+ * @param {string} argvPath - `process.argv[1]`
+ * @returns {boolean}
+ */
+export function isSameEntryPoint(metaUrl, argvPath) {
+  try {
+    const metaPath = fileURLToPath(metaUrl);
+    return realpathSync(metaPath) === realpathSync(argvPath);
+  } catch {
+    // realpath failed on one side — fall back to the raw URL compare.
+    try {
+      return metaUrl === pathToFileURL(argvPath).href;
+    } catch {
+      return false;
+    }
+  }
+}
+
+// isMain gate — normalise both sides via realpath. Without this, macOS symlinks
+// like `/tmp` -> `/private/tmp` and every `npm link` / `pnpm link` shim break
+// the compare and main() silently never runs. See BUG-001.
+const isMain = process.argv[1] && isSameEntryPoint(import.meta.url, process.argv[1]);
 if (isMain) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))

@@ -362,6 +362,7 @@ export async function createDocument({ projectRoot, tree, kind, body, options = 
       kind: 'ioFailure',
       message: `create ${kind}: write failed: ${err.message}`,
       filePath: relPath,
+      stack: err.stack,
     });
   }
   return { id, filePath: relPath, body: finalBody };
@@ -396,6 +397,16 @@ function assembleBody({ tree, canonical, id, parentId, body, options }) {
   const now = nowIso();
   const prdId = tree.prd?.prdId ?? 'PRD-001';
   const base = { ...(body ?? {}) };
+  // BUG-002/BUG-003 fix: `--title` is a CLI convenience seed. The writer's
+  // job is to place it in the field the kind's schema wants — `title` for
+  // req/us/adr/fbs/ts (schema-required) or `name` for tac (which lacks
+  // `title` and forbids additional properties). Lift the seed out of the
+  // base body so it never leaks via the spread below, then place it
+  // explicitly per kind. This also stops the previous title→description /
+  // title→summary / title→purpose cross-fallbacks that produced doc bodies
+  // where two semantic fields carried the same value.
+  const titleSeed = typeof base.title === 'string' ? base.title : undefined;
+  delete base.title;
   const withTimestamps = {
     createdAt: now,
     updatedAt: now,
@@ -408,7 +419,8 @@ function assembleBody({ tree, canonical, id, parentId, body, options }) {
         ...withTimestamps,
         reqId: id,
         prdId: parentId,
-        description: base.description ?? base.title ?? 'TODO: describe the requirement',
+        title: titleSeed ?? 'TODO: name this requirement',
+        description: base.description ?? 'TODO: describe this requirement.',
         category: base.category ?? 'functional',
         domain: base.domain ?? 'todo',
         priority: base.priority ?? 'must',
@@ -423,6 +435,7 @@ function assembleBody({ tree, canonical, id, parentId, body, options }) {
         reqId: parentId,
         version: base.version ?? '0.1.0',
         status: base.status ?? 'draft',
+        title: titleSeed ?? 'TODO: name this user story',
         asA: base.asA ?? 'TODO: name the user',
         iWant: base.iWant ?? 'TODO: state the want',
         soThat: base.soThat ?? 'TODO: state the value',
@@ -440,9 +453,9 @@ function assembleBody({ tree, canonical, id, parentId, body, options }) {
         tadId: parentId,
         version: base.version ?? '0.1.0',
         status: base.status ?? 'draft',
-        purpose: base.purpose ?? base.title ?? 'TODO: state the purpose',
+        purpose: base.purpose ?? 'TODO: state the purpose',
         responsibilities: base.responsibilities ?? ['TODO: list at least one responsibility'],
-        name: base.name ?? base.title ?? 'TODO: name this component',
+        name: base.name ?? titleSeed ?? 'TODO: name this component',
       };
     case 'adr':
       return {
@@ -452,6 +465,7 @@ function assembleBody({ tree, canonical, id, parentId, body, options }) {
         tadId: parentId,
         version: base.version ?? '0.1.0',
         status: base.status ?? 'proposed',
+        title: titleSeed ?? 'TODO: name this ADR',
         context: base.context ?? 'TODO: describe the context',
         decision: base.decision ?? 'TODO: describe the decision',
         consequences: base.consequences ?? 'TODO: describe the consequences',
@@ -465,7 +479,8 @@ function assembleBody({ tree, canonical, id, parentId, body, options }) {
         bsId: parentId,
         buildOrder,
         executionStatus: base.executionStatus ?? 'notStarted',
-        summary: base.summary ?? base.title ?? 'TODO: describe the build session',
+        title: titleSeed ?? 'TODO: name this build session',
+        summary: base.summary ?? 'TODO: describe the build session',
         acIds: base.acIds ?? [],
         dependsOnFbsIds: base.dependsOnFbsIds ?? [],
       };
@@ -477,7 +492,7 @@ function assembleBody({ tree, canonical, id, parentId, body, options }) {
         ...withTimestamps,
         id,
         usId: parentId,
-        title: base.title ?? 'TODO: name this test suite',
+        title: titleSeed ?? 'TODO: name this test suite',
         purpose: base.purpose ?? 'TODO: state the purpose',
         testLevel: base.testLevel ?? 'unit',
         acIds: base.acIds ?? [],
@@ -545,7 +560,7 @@ async function createInlineAc({ projectRoot, tree, options, body }) {
   try {
     await writeJsonAtomic(pathForKindFile(projectRoot, 'userStory', parentUsId), nextUs);
   } catch (err) {
-    return rcfError({ kind: 'ioFailure', message: `create ac: write failed: ${err.message}`, filePath: relPath });
+    return rcfError({ kind: 'ioFailure', message: `create ac: write failed: ${err.message}`, filePath: relPath, stack: err.stack });
   }
   return { id: acId, filePath: relPath, parentId: parentUsId, body: acEntry };
 }
@@ -620,7 +635,7 @@ async function createInlineTc({ projectRoot, tree, options, body }) {
   try {
     await writeJsonAtomic(pathForKindFile(projectRoot, 'testSuite', parentTsId), nextTs);
   } catch (err) {
-    return rcfError({ kind: 'ioFailure', message: `create tc: write failed: ${err.message}`, filePath: relPath });
+    return rcfError({ kind: 'ioFailure', message: `create tc: write failed: ${err.message}`, filePath: relPath, stack: err.stack });
   }
   return { id: tcId, filePath: relPath, parentId: parentTsId, body: tcEntry };
 }
@@ -731,7 +746,7 @@ export async function updateDocument({ projectRoot, tree, id, patch, sets = [], 
   try {
     await writeJsonAtomic(absPath, next);
   } catch (err) {
-    return rcfError({ kind: 'ioFailure', message: `update: write failed: ${err.message}`, filePath: relPath });
+    return rcfError({ kind: 'ioFailure', message: `update: write failed: ${err.message}`, filePath: relPath, stack: err.stack });
   }
   return { id, filePath: relPath, body: next };
 }
@@ -836,7 +851,7 @@ async function updateInline({ projectRoot, tree, inline, id, patch, sets, option
   try {
     await writeJsonAtomic(pathForKindFile(projectRoot, kind, parentId), nextParent);
   } catch (err) {
-    return rcfError({ kind: 'ioFailure', message: `update: write failed: ${err.message}`, filePath: relPath });
+    return rcfError({ kind: 'ioFailure', message: `update: write failed: ${err.message}`, filePath: relPath, stack: err.stack });
   }
   return { id, filePath: relPath, parentId, body: entry };
 }
@@ -969,7 +984,7 @@ async function deleteTac({ projectRoot, tree, id, cascade, options }) {
   const tacRel = `rcf/tacs/${id.toLowerCase()}.json`;
   if (!options.dryRun) {
     try { await unlink(pathForKindFile(projectRoot, 'tac', id)); } catch (err) {
-      return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: tacRel });
+      return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: tacRel, stack: err.stack });
     }
   }
   return { deleted: [id], mutated, plan: buildPlanLines([id], mutated) };
@@ -979,7 +994,7 @@ async function deleteAdr({ projectRoot, tree, id, options }) {
   const adrRel = `rcf/adrs/${id.toLowerCase()}.json`;
   if (!options.dryRun) {
     try { await unlink(pathForKindFile(projectRoot, 'adr', id)); } catch (err) {
-      return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: adrRel });
+      return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: adrRel, stack: err.stack });
     }
   }
   return { deleted: [id], mutated: [], plan: [`delete ${adrRel}`] };
@@ -1009,7 +1024,7 @@ async function deleteFbs({ projectRoot, tree, id, cascade, options }) {
   const fbsRel = `rcf/fbs/${id.toLowerCase()}.json`;
   if (!options.dryRun) {
     try { await unlink(pathForKindFile(projectRoot, 'fbs', id)); } catch (err) {
-      return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: fbsRel });
+      return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: fbsRel, stack: err.stack });
     }
   }
   return { deleted: [id], mutated, plan: buildPlanLines([id], mutated) };
@@ -1019,7 +1034,7 @@ async function deleteTs({ projectRoot, tree, id, options }) {
   const tsRel = `rcf/test-suites/${id.toLowerCase()}.json`;
   if (!options.dryRun) {
     try { await unlink(pathForKindFile(projectRoot, 'testSuite', id)); } catch (err) {
-      return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: tsRel });
+      return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: tsRel, stack: err.stack });
     }
   }
   return { deleted: [id], mutated: [], plan: [`delete ${tsRel}`] };
@@ -1116,7 +1131,7 @@ async function writeInlineParent({
     try {
       await writeJsonAtomic(pathForKindFile(projectRoot, parentKind, parentId), next);
     } catch (err) {
-      return rcfError({ kind: 'ioFailure', message: `delete: write failed: ${err.message}`, filePath: relPath });
+      return rcfError({ kind: 'ioFailure', message: `delete: write failed: ${err.message}`, filePath: relPath, stack: err.stack });
     }
   }
   const mutated = [...precomputedMutated, { id: parentId, filePath: relPath }];
@@ -1181,7 +1196,7 @@ async function executeCascade({ projectRoot, tree, toDelete, collectedAcIds, opt
     if (!options.dryRun) {
       try { await unlink(pathForKindFile(projectRoot, kind, delId)); } catch (err) {
         if (err.code !== 'ENOENT') {
-          return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: relPath });
+          return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: relPath, stack: err.stack });
         }
       }
     }
@@ -1249,7 +1264,16 @@ function refuseWithDependents(id, dependents) {
 function buildPlanLines(deleted, mutated) {
   return [
     ...mutated.map((m) => `mutate ${m.filePath}`),
-    ...deleted.map((id) => `delete rcf/.../${id.toLowerCase()}.json`),
+    ...deleted.map((id) => {
+      // BUG-006 fix: resolve the real kind-directory from the id prefix
+      // instead of emitting the `rcf/.../` placeholder. `pathForId`
+      // returns `{ kind, relPath }` where `relPath` already includes the
+      // kind subdirectory (e.g. `requirements/req-002.json`); prepend
+      // the `rcf/` root to line up with the other plan lines.
+      const resolved = pathForId(id);
+      const rel = resolved ? `rcf/${resolved.relPath}` : `rcf/${id.toLowerCase()}.json`;
+      return `delete ${rel}`;
+    }),
   ];
 }
 

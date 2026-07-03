@@ -18,6 +18,7 @@
  * @property {string} [filePath]
  * @property {string} [field]
  * @property {string} [rule]
+ * @property {string} [stack] - underlying Error.stack for exit-1 spec §D15
  */
 
 const VALID_KINDS = new Set([
@@ -39,9 +40,12 @@ const VALID_KINDS = new Set([
  * @param {string} [opts.filePath]
  * @param {string} [opts.field]
  * @param {string} [opts.rule]
+ * @param {string} [opts.stack] - underlying Error.stack, retained on
+ *   `ioFailure` so CLI handlers can emit the spec §D15 `[rcf]
+ *   unexpected failure` block including the stack.
  * @returns {RcfError}
  */
-export function rcfError({ kind, message, documentId, filePath, field, rule }) {
+export function rcfError({ kind, message, documentId, filePath, field, rule, stack }) {
   if (!VALID_KINDS.has(kind)) {
     throw new TypeError(`Unknown error kind: ${kind}`);
   }
@@ -53,7 +57,23 @@ export function rcfError({ kind, message, documentId, filePath, field, rule }) {
   if (filePath !== undefined) out.filePath = filePath;
   if (field !== undefined) out.field = field;
   if (rule !== undefined) out.rule = rule;
+  if (typeof stack === 'string' && stack.length > 0) out.stack = stack;
   return out;
+}
+
+/**
+ * Emit the spec §D15 `[rcf] unexpected failure` block to a stream.
+ * Used by CLI handlers when they receive a structured `ioFailure` —
+ * exit 1 is the "unexpected / IO" escape hatch and must always print
+ * `[rcf] unexpected failure: <message>\n<stack>` on stderr, per spec.
+ *
+ * @param {RcfError} err
+ * @param {NodeJS.WritableStream} stderr
+ */
+export function writeUnexpectedFailure(err, stderr) {
+  const message = err.message ?? 'unexpected failure';
+  const stack = err.stack ?? '';
+  stderr.write(`[rcf] unexpected failure: ${message}\n${stack}\n`);
 }
 
 /**
@@ -104,8 +124,13 @@ export function formatError(err, opts = {}) {
  * (so the caller gets the hint exactly once and not after they used the
  * flag already).
  *
+ * When the caller renders only a subset of a larger error list (e.g.
+ * `validate --quiet` shows the first 3 of N), pass the true total via
+ * `opts.total` so the summary reports the tree-wide count. Without the
+ * override the summary reports the length of `errors` (BUG-004 fix).
+ *
  * @param {RcfError[]} errors
- * @param {{ verbose?: boolean, strict?: boolean }} [opts]
+ * @param {{ verbose?: boolean, strict?: boolean, total?: number }} [opts]
  * @returns {string}
  */
 export function formatErrors(errors, opts = {}) {
@@ -113,7 +138,9 @@ export function formatErrors(errors, opts = {}) {
   const verbose = Boolean(opts.verbose);
   const strict = Boolean(opts.strict);
   const lines = errors.map((e) => formatError(e, { verbose }));
-  const count = errors.length;
+  const count = typeof opts.total === 'number' && Number.isFinite(opts.total)
+    ? opts.total
+    : errors.length;
   const noun = count === 1 ? 'error' : 'errors';
   const summary = strict
     ? `[error] ${count} ${noun} found; output not written.`
