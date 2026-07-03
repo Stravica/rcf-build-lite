@@ -4,8 +4,7 @@
 
 import { parseArgs } from 'node:util';
 
-import { isRcfError } from '../errors/index.js';
-import { formatErrors } from '../errors/index.js';
+import { formatErrors, isRcfError, writeUnexpectedFailure } from '../errors/index.js';
 import { deleteDocument, walkTree } from '../store/index.js';
 import { findProjectRoot } from '../view/index.js';
 
@@ -73,9 +72,22 @@ export async function main(argv, deps = {}) {
     },
   });
   if (isRcfError(result)) return handleDeleteError(result, stderr);
-  const label = flags['dry-run'] ? '[dry-run] would ' : '';
+  // BUG-005 fix: split the header text between dry-run (future tense,
+  // "Would delete …") and executed (past tense, "Deleted …"). Previously
+  // both paths shared the future-tense header, making an executed delete
+  // visually indistinguishable from a plan at the summary line.
+  const dryRun = Boolean(flags['dry-run']);
+  const label = dryRun ? '[dry-run] would ' : '';
   if (!flags.quiet) {
-    stdout.write(`Would delete ${result.deleted.length} file(s) and mutate ${result.mutated.length} doc(s).\n`);
+    if (dryRun) {
+      stdout.write(
+        `Would delete ${result.deleted.length} file(s) and mutate ${result.mutated.length} doc(s). (dry-run)\n`,
+      );
+    } else {
+      stdout.write(
+        `Deleted ${result.deleted.length} file(s), mutated ${result.mutated.length} doc(s).\n`,
+      );
+    }
     for (const line of result.plan) stdout.write(`  ${label}${line}\n`);
   }
   return 0;
@@ -85,15 +97,27 @@ export async function main(argv, deps = {}) {
  * `rcfError.kind === 'usage'` from writer.deleteDocument overloads two
  * exit codes: the plain "unknown id / already-clean" cases stay exit 2,
  * while a `rule` of `dependents` / `wouldOrphan` maps to exit 4.
+ *
+ * BUG-007 fix: `ioFailure` emits the spec §D15 `[rcf] unexpected failure`
+ * block (message + stack), not the structured `[error] ioFailure` line.
+ *
+ * BUG-008 fix: exit-4 refusals are labelled `[error] refused …` so the
+ * prefix matches the exit-code semantics, instead of the misleading
+ * `[error] usage …` prefix used when the underlying `rcfError.kind`
+ * happens to be `usage` with a `dependents` / `wouldOrphan` rule.
  */
 function handleDeleteError(err, stderr) {
   const kind = err.kind;
-  stderr.write(`[error] ${kind} ${err.message}\n`);
-  if (kind === 'usage') {
-    if (err.rule === 'dependents' || err.rule === 'wouldOrphan') return 4;
-    return 2;
+  if (kind === 'ioFailure') {
+    writeUnexpectedFailure(err, stderr);
+    return 1;
   }
+  if (kind === 'usage' && (err.rule === 'dependents' || err.rule === 'wouldOrphan')) {
+    stderr.write(`[error] refused ${err.message}\n`);
+    return 4;
+  }
+  stderr.write(`[error] ${kind} ${err.message}\n`);
+  if (kind === 'usage') return 2;
   if (kind === 'validation' || kind === 'brokenReference') return 3;
-  if (kind === 'ioFailure') return 1;
   return 1;
 }

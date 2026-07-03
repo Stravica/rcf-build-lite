@@ -2,6 +2,8 @@
 // only (Phase 4 §D17). Long-form docs land in Phase 8; this help block
 // is the sole documentation surface for the phase.
 
+import { HELP as VIEW_HELP } from './view.js';
+
 const TOP_LEVEL = `Usage: rcf <command> [options]
 
 Commands:
@@ -133,7 +135,11 @@ Options:
   --help                    Print this help
 `;
 
-const VIEW_HELP_STUB = `See 'rcf view --help' for view options.`;
+// BUG-011 fix: `rcf help view` previously printed a pointer
+// (`See 'rcf view --help' for view options.`). Every other subcommand's
+// help block renders inline; wire `view` through to the same block that
+// `rcf view --help` prints (imported above), so `rcf help view` is
+// consistent with the other 8 subcommands.
 
 const HELP_MAP = {
   init: INIT_HELP,
@@ -144,7 +150,7 @@ const HELP_MAP = {
   delete: DELETE_HELP,
   link: LINK_HELP,
   unlink: UNLINK_HELP,
-  view: VIEW_HELP_STUB,
+  view: VIEW_HELP,
 };
 
 /**

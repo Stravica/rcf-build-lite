@@ -6,8 +6,7 @@
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 
-import { isRcfError } from '../errors/index.js';
-import { formatErrors } from '../errors/index.js';
+import { formatErrors, isRcfError, writeUnexpectedFailure } from '../errors/index.js';
 import { updateDocument, walkTree } from '../store/index.js';
 import { findProjectRoot } from '../view/index.js';
 
@@ -119,9 +118,14 @@ export async function main(argv, deps = {}) {
 
 function handleWriterError(err, stderr) {
   const kind = err.kind;
+  // BUG-007 fix: spec §D15 mandates exit-1 emit
+  // `[rcf] unexpected failure: <msg>\n<stack>` — even under --quiet.
+  if (kind === 'ioFailure') {
+    writeUnexpectedFailure(err, stderr);
+    return 1;
+  }
   stderr.write(`[error] ${kind} ${err.message}\n`);
   if (kind === 'usage') return 2;
   if (kind === 'validation' || kind === 'brokenReference') return 3;
-  if (kind === 'ioFailure') return 1;
   return 1;
 }

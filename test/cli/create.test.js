@@ -49,11 +49,11 @@ test('rcf create req without --parent exits 2 (usage)', async () => {
   assert.match(stderr, /--parent is required/);
 });
 
-test('rcf create with unknown kind exits 2', async () => {
+test('rcf create with unknown kind exits 2 (BUG-009: distinct unknown-kind message)', async () => {
   const tmp = await scaffold();
   const { code, stderr } = await runBin(tmp, ['create', 'nope', '--parent', 'PRD-001', '--title', 'T']);
   assert.equal(code, 2);
-  assert.match(stderr, /expected exactly one <kind>/);
+  assert.match(stderr, /unknown kind: nope/);
 });
 
 test('rcf create us --parent REQ-999 exits 3 (brokenReference)', async () => {

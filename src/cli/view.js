@@ -16,7 +16,7 @@ import { startServer } from '../server/index.js';
 export const DEFAULT_PORT = 4373;
 export const SHUTDOWN_BUDGET_MS = 2000;
 
-const HELP = `Usage: rcf view [options]
+export const HELP = `Usage: rcf view [options]
 
 Serve the on-disk RCF tree as a live HTML review surface. Runs a
 long-running HTTP + SSE server on 127.0.0.1 that watches rcf/ and pushes

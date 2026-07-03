@@ -69,7 +69,10 @@ export async function main(argv, deps = {}) {
   }
   if (flags.quiet) {
     const first = errors.slice(0, 3);
-    stderr.write(`${formatErrors(first, { verbose: false, strict: false })}\n`);
+    // BUG-004 fix: `--quiet` used to render `errors.length` (== 3) as the
+    // summary count. Pass the true total through so the summary reads
+    // "N errors found" for the whole tree, not just the shown subset.
+    stderr.write(`${formatErrors(first, { verbose: false, strict: false, total: errors.length })}\n`);
     if (errors.length > 3) stderr.write(`... ${errors.length - 3} more issue(s) suppressed by --quiet\n`);
   } else {
     stderr.write(`${formatErrors(errors, { verbose: false, strict: false })}\n`);
