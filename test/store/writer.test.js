@@ -446,3 +446,74 @@ test('deriveSlug lowercases and squashes non-alphanumeric runs', () => {
   assert.equal(deriveSlug('   Multi  Space   '), 'multi-space');
   assert.equal(deriveSlug('!!!'), 'tc');
 });
+
+// ---- B2 regression (E2E matrix 2026-07-06-003) -----------------------------
+
+test('deriveSlug truncates at a word boundary, never mid-word (B2)', () => {
+  // Untruncated slug: "with-several-snags-and-photos-saved-while-offline-on-site".
+  // The old .slice(0, 40) produced "...-saved-whil" (chopped mid-word).
+  const slug = deriveSlug('With several snags and photos saved while offline on site');
+  assert.equal(slug, 'with-several-snags-and-photos-saved');
+  assert.equal(slug.length <= 40, true);
+  assert.doesNotMatch(slug, /-$/, 'no trailing hyphen');
+});
+
+test('deriveSlug keeps a word whose end coincides with the length limit (B2)', () => {
+  // "twelve-chars" repeated: "abcdefghijkl-abcdefghijkl-abcdefghijkl" is
+  // 38 chars; adding "-ab" ends a word exactly at char 40.
+  const slug = deriveSlug('abcdefghijkl abcdefghijkl abcdefghijkl a xyz');
+  assert.equal(slug, 'abcdefghijkl-abcdefghijkl-abcdefghijkl-a');
+  assert.equal(slug.length, 40);
+});
+
+test('deriveSlug with a single over-long word keeps the 40-char prefix (B2)', () => {
+  // No word boundary exists inside the limit; the prefix is the only option.
+  assert.equal(deriveSlug('x'.repeat(50)), 'x'.repeat(40));
+});
+
+// ---- B1 regression (E2E matrix 2026-07-06-003) -----------------------------
+
+test('create then update: updatedAt is a full timestamp never earlier than createdAt (B1)', async () => {
+  const { projectRoot, tree } = await scaffold();
+  const before = Date.now();
+  const created = await createDocument({
+    projectRoot, tree, kind: 'req', body: { title: 'Timestamp discipline' }, options: { parentId: 'PRD-001' },
+  });
+  assert.equal(created.id, 'REQ-002');
+  const reloaded = await reload(projectRoot);
+  const updated = await updateDocument({
+    projectRoot, tree: reloaded.tree, id: 'REQ-002', sets: [{ path: 'title', value: 'Timestamp discipline, renamed' }],
+  });
+  const body = updated.body;
+  const createdAtMs = Date.parse(body.createdAt);
+  const updatedAtMs = Date.parse(body.updatedAt);
+  assert.equal(Number.isNaN(createdAtMs), false);
+  assert.equal(Number.isNaN(updatedAtMs), false);
+  assert.equal(updatedAtMs >= createdAtMs, true,
+    `updatedAt (${body.updatedAt}) must not precede createdAt (${body.createdAt})`);
+  assert.equal(createdAtMs >= before, true, 'createdAt comes from the live writer clock');
+  for (const value of [body.createdAt, body.updatedAt]) {
+    assert.doesNotMatch(value, /T00:00:00(\.000)?Z$/, `${value} looks midnight-truncated (date-only)`);
+  }
+});
+
+test('create ignores caller-supplied createdAt / updatedAt - the writer clock wins (B1)', async () => {
+  const { projectRoot, tree } = await scaffold();
+  // The E2E persona passed a date-only "today" through the MCP body
+  // object; serialised as midnight UTC it overrode the writer clock and
+  // produced updatedAt EARLIER than the same document's createdAt.
+  const midnight = '2026-07-06T00:00:00Z';
+  const res = await createDocument({
+    projectRoot,
+    tree,
+    kind: 'req',
+    body: { title: 'Clock ownership', createdAt: midnight, updatedAt: midnight },
+    options: { parentId: 'PRD-001' },
+  });
+  assert.equal(res.id, 'REQ-002');
+  assert.notEqual(res.body.updatedAt, midnight);
+  assert.notEqual(res.body.createdAt, midnight);
+  assert.equal(res.body.createdAt, res.body.updatedAt, 'both fields come from the same nowIso() call');
+  const onDisk = JSON.parse(await readFile(join(projectRoot, 'rcf/requirements/req-002.json'), 'utf8'));
+  assert.equal(onDisk.updatedAt, res.body.updatedAt);
+});

@@ -92,7 +92,12 @@ export async function main(argv, deps = {}) {
   const start = flags['project-root'] ? resolvePath(cwd, flags['project-root']) : cwd;
   const projectRoot = await findProjectRoot(start);
   if (!projectRoot) {
-    stderr.write(`[error] usage no project root found (no rcf/manifest.json in ${start} or any ancestor).\n`);
+    // B3 (E2E matrix 2026-07-06-003): an MCP client surfaces this failure
+    // as "zero tools" with no visible error, so the stderr line must tell
+    // the operator exactly what to do next.
+    stderr.write(`[error] usage no project root found (no rcf/manifest.json in ${start} or any ancestor). `
+      + 'The MCP server needs an existing rcf/ tree - run `rcf init` in the project first, '
+      + 'or pass --project-root <path>. See docs/install.md, section 7.\n');
     return 2;
   }
 

@@ -22,6 +22,63 @@ Options:
   --help                    Print this help
 `;
 
+// Case-insensitive whole-word TODO match. Word-bounded so incidental
+// substrings (e.g. "autodoc") do not trip the scan.
+const TODO_RE = /\btodo\b/i;
+
+/**
+ * Recursively collect dot-paths of string fields containing TODO
+ * placeholder text.
+ * @param {unknown} value
+ * @param {string} path
+ * @param {string[]} out
+ */
+function findTodoFields(value, path, out) {
+  if (typeof value === 'string') {
+    if (TODO_RE.test(value)) out.push(path);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => findTodoFields(v, `${path}[${i}]`, out));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      findTodoFields(v, path ? `${path}.${k}` : k, out);
+    }
+  }
+}
+
+/**
+ * Scan every loaded document (roots + children; inline ACs / TCs ride
+ * inside their parent doc's fields) for TODO placeholder text left over
+ * from `rcf init` scaffolding. Cheap by design (B4): one string sweep,
+ * one entry per affected doc.
+ * @param {object} tree - walker TreeModel
+ * @returns {Array<{ id: string, fields: string[] }>}
+ */
+function collectTodoNotices(tree) {
+  const docs = [
+    ...(tree.prd ? [{ id: tree.prd.prdId, doc: tree.prd }] : []),
+    ...(tree.tad ? [{ id: tree.tad.tadId, doc: tree.tad }] : []),
+    ...(tree.bs ? [{ id: tree.bs.bsId, doc: tree.bs }] : []),
+    ...tree.requirements.map((d) => ({ id: d.reqId, doc: d })),
+    ...tree.userStories.map((d) => ({ id: d.usId, doc: d })),
+    ...tree.tacs.map((d) => ({ id: d.tacId, doc: d })),
+    ...tree.adrs.map((d) => ({ id: d.adrId, doc: d })),
+    ...tree.fbsItems.map((d) => ({ id: d.fbsId, doc: d })),
+    ...tree.testSuites.map((d) => ({ id: d.id, doc: d })),
+  ];
+  const notices = [];
+  for (const { id, doc } of docs) {
+    /** @type {string[]} */
+    const fields = [];
+    findTodoFields(doc, '', fields);
+    if (fields.length > 0) notices.push({ id: id ?? '(unknown id)', fields });
+  }
+  return notices;
+}
+
 /**
  * @param {string[]} argv - argv slice after `validate`
  * @param {object} [deps]
@@ -50,7 +107,7 @@ export async function main(argv, deps = {}) {
     stderr.write('[error] usage no project root found (no rcf/manifest.json in this directory or any ancestor).\n');
     return 2;
   }
-  const { errors } = await walkTree({ projectRoot });
+  const { tree, errors } = await walkTree({ projectRoot });
   if (flags.json) {
     const issues = errors.map((e) => ({
       id: e.documentId ?? null,
@@ -64,7 +121,19 @@ export async function main(argv, deps = {}) {
     return errors.length === 0 ? 0 : 3;
   }
   if (errors.length === 0) {
-    if (!flags.quiet) stdout.write('rcf validate: tree is clean.\n');
+    if (!flags.quiet) {
+      stdout.write('rcf validate: tree is clean.\n');
+      // B4 (E2E matrix 2026-07-06-003): scaffold TODO placeholders were
+      // surviving to otherwise-valid trees unflagged. Non-blocking notice
+      // only - the exit code is unchanged.
+      const notices = collectTodoNotices(tree);
+      if (notices.length > 0) {
+        stdout.write(`notice: ${notices.length} document(s) still carry scaffold TODO placeholder text (informational; exit code unaffected):\n`);
+        for (const n of notices) {
+          stdout.write(`  ${n.id}: ${n.fields.join(', ')}\n`);
+        }
+      }
+    }
     return 0;
   }
   if (flags.quiet) {
