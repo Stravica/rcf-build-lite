@@ -407,6 +407,15 @@ function assembleBody({ tree, canonical, id, parentId, body, options }) {
   // where two semantic fields carried the same value.
   const titleSeed = typeof base.title === 'string' ? base.title : undefined;
   delete base.title;
+  // B1 fix (E2E matrix 2026-07-06-003): timestamps are writer-owned. The
+  // `...base` spread below previously let a caller-supplied createdAt /
+  // updatedAt (via --from-file or the MCP body object) override the
+  // writer clock - a date-only "today" value serialised as midnight UTC
+  // produced updatedAt EARLIER than the same doc's createdAt. Strip both
+  // so create mirrors update, which already refuses createdAt and forces
+  // updatedAt = nowIso().
+  delete base.createdAt;
+  delete base.updatedAt;
   const withTimestamps = {
     createdAt: now,
     updatedAt: now,
@@ -642,16 +651,25 @@ async function createInlineTc({ projectRoot, tree, options, body }) {
 
 /**
  * Derive a slug from a description string. Lowercase, alphanumerics
- * plus hyphens, first 40 chars max, single hyphen runs.
+ * plus hyphens, first 40 chars max, single hyphen runs. Truncation
+ * lands on a word boundary: if the 40-char cut falls mid-word the
+ * partial word is dropped (B2 fix, E2E matrix 2026-07-06-003 - ids
+ * like "...-saved-whil" chopped mid-word). A single unbroken word
+ * longer than the limit keeps its 40-char prefix (no boundary exists).
  * @param {string} description
  */
 export function deriveSlug(description) {
-  const slug = String(description)
+  const full = String(description)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40)
-    .replace(/-+$/g, '');
+    .replace(/^-+|-+$/g, '');
+  let slug = full.slice(0, 40);
+  if (full.length > 40 && full[40] !== '-') {
+    // The cut landed inside a word - back off to the last hyphen.
+    const boundary = slug.lastIndexOf('-');
+    if (boundary > 0) slug = slug.slice(0, boundary);
+  }
+  slug = slug.replace(/-+$/g, '');
   return slug.length > 0 ? slug : 'tc';
 }
 

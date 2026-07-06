@@ -39,6 +39,57 @@ test('rcf validate on a clean tree exits 0', async () => {
   assert.match(stdout, /tree is clean/);
 });
 
+// ---- B4 regression (E2E matrix 2026-07-06-003) -----------------------------
+
+test('rcf validate on a fresh scaffold exits 0 AND prints the TODO-placeholder notice (B4)', async () => {
+  const tmp = await scaffold();
+  const { code, stdout } = await runBin(tmp, ['validate']);
+  assert.equal(code, 0, 'the notice is informational - exit code unchanged');
+  assert.match(stdout, /tree is clean/);
+  assert.match(stdout, /notice: \d+ document\(s\) still carry scaffold TODO placeholder text/);
+  // One line per affected doc: the scaffold REQ and PRD both carry TODOs.
+  assert.match(stdout, /^ {2}PRD-001: /m);
+  assert.match(stdout, /^ {2}REQ-001: /m);
+});
+
+test('rcf validate prints no TODO notice once placeholder text is gone (B4)', async () => {
+  const tmp = await scaffold();
+  // Turn the scaffold into a "real" tree: rewrite every string field that
+  // carries TODO placeholder text. All affected fields are free strings
+  // (minLength 1), so plain text keeps the tree schema-valid.
+  const { readdir } = await import('node:fs/promises');
+  const files = ['rcf/prd.json', 'rcf/tad.json', 'rcf/build-sequence.json'];
+  for (const dir of ['requirements', 'user-stories', 'tacs', 'adrs', 'fbs', 'test-suites']) {
+    for (const name of await readdir(join(tmp, 'rcf', dir))) {
+      files.push(`rcf/${dir}/${name}`);
+    }
+  }
+  const scrub = (value) => {
+    if (typeof value === 'string') return /todo/i.test(value) ? 'authored content' : value;
+    if (Array.isArray(value)) return value.map(scrub);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrub(v)]));
+    }
+    return value;
+  };
+  for (const rel of files) {
+    const path = join(tmp, rel);
+    const doc = JSON.parse(await readFile(path, 'utf8'));
+    await writeFile(path, `${JSON.stringify(scrub(doc), null, 2)}\n`, 'utf8');
+  }
+  const { code, stdout } = await runBin(tmp, ['validate']);
+  assert.equal(code, 0);
+  assert.match(stdout, /tree is clean/);
+  assert.doesNotMatch(stdout, /notice:/);
+});
+
+test('rcf validate --quiet suppresses the TODO notice (B4)', async () => {
+  const tmp = await scaffold();
+  const { code, stdout } = await runBin(tmp, ['validate', '--quiet']);
+  assert.equal(code, 0);
+  assert.doesNotMatch(stdout, /notice:/);
+});
+
 test('rcf validate on a broken tree exits 3', async () => {
   const tmp = await scaffold();
   const reqPath = join(tmp, 'rcf/requirements/req-001.json');
