@@ -40,6 +40,7 @@ import {
   kindOf,
 } from '../query/index.js';
 import { assembleBundle } from '../build/index.js';
+import { hasAgentMarker, SETUP_FUNNEL_INSTRUCTION } from '../setup/agent-setup.js';
 
 // ---------------------------------------------------------------------------
 // Shared output-schema fragments
@@ -425,7 +426,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_validate',
     title: 'Validate the RCF tree',
-    description: 'Reports whether the RCF tree is structurally sound: schema-validation and broken-reference issues across every document. A tree with issues returns {ok: false, issues: [...]} as data, not an error - the issues ARE the answer. Run this first in any session.',
+    description: 'Reports whether the RCF tree is structurally sound: schema-validation and broken-reference issues across every document. A tree with issues returns {ok: false, issues: [...]} as data, not an error - the issues ARE the answer. Run this first in any session, and again after every tree edit (the build-cycle playbook, rcf_execute_build_cycle, prescribes it).',
     inputSchema: { type: 'object', additionalProperties: false },
     outputSchema: withErrorPayload(VALIDATE_OUTPUT_SCHEMA),
     annotations: { readOnlyHint: true },
@@ -433,7 +434,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_coverage',
     title: 'Structural coverage report',
-    description: 'Reports which requirements have at least one complete chain to a test case (PRD -> REQ -> US -> AC -> TS -> TC). This is a mechanical, deterministic structural check: it does NOT judge whether the AC set adequately captures a requirement\'s intent. In strict mode, gaps are returned as data ({ok: false} in the envelope), never as a tool error - unlike the CLI, which exits 4 for CI gating.',
+    description: 'Reports which requirements have at least one complete chain to a test case (PRD -> REQ -> US -> AC -> TS -> TC). This is a mechanical, deterministic structural check: it does NOT judge whether the AC set adequately captures a requirement\'s intent. In strict mode, gaps are returned as data ({ok: false} in the envelope), never as a tool error - unlike the CLI, which exits 4 for CI gating. Method: TS / TC docs are authored deliverables - a coverage gap means the test layer is not finished, not a stat to report.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -448,7 +449,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_trace',
     title: 'Trace the graph from an id',
-    description: 'Answers "what hangs off this document" (forward), "what does it hang off" (back), or both, from any document id. Back-traces follow parent-child edges only; cross-link fan-out is what rcf_impact is for.',
+    description: 'Answers "what hangs off this document" (forward), "what does it hang off" (back), or both, from any document id. Back-traces follow parent-child edges only; cross-link fan-out is what rcf_impact is for. Method: trace before touching anything that other documents hang off.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -464,7 +465,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_impact',
     title: 'Impact fan-out for a change',
-    description: 'Answers "if this document changes, what needs re-checking": ancestors and descendants with a per-node action label (re-run, re-verify, re-approve, review-scope, review-arch, review-plan, re-execute, review-context).',
+    description: 'Answers "if this document changes, what needs re-checking": ancestors and descendants with a per-node action label (re-run, re-verify, re-approve, review-scope, review-arch, review-plan, re-execute, review-context). Method: run this before changing any document with dependents.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -479,7 +480,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_read',
     title: 'Read a document',
-    description: 'Returns one document\'s body (or a single dot-path field) by id. Resolves standalone documents, inline acceptance criteria (AC-...), inline test cases (TC-...) and MANIFEST.',
+    description: 'Returns one document\'s body (or a single dot-path field) by id. Resolves standalone documents, inline acceptance criteria (AC-...), inline test cases (TC-...) and MANIFEST. Method: read the real document before editing it - updates patch what exists, never a remembered body.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -495,7 +496,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_create',
     title: 'Create a document',
-    description: 'Creates a new RCF document of the given kind under a parent. Inline kinds (ac, tc) mutate their parent document; every other kind writes one new file. Body fields beyond the dedicated properties go in the body object; dedicated properties win on conflict.',
+    description: 'Creates a new RCF document of the given kind under a parent. Inline kinds (ac, tc) mutate their parent document; every other kind writes one new file. Body fields beyond the dedicated properties go in the body object; dedicated properties win on conflict. Method: RCF layers (PRD -> REQ -> US -> AC -> TS -> TC, plus TAD / TAC / ADR) are elicited with the stakeholder - see the rcf_elicit_requirements prompt - never fabricated single-shot.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -523,7 +524,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_update',
     title: 'Update a document',
-    description: 'Patches fields on an existing document: dot-path sets, a deep-merge patch object, or both. Refuses to touch id, createdAt and schemaVersion. Values are any JSON type - no string re-encoding.',
+    description: 'Patches fields on an existing document: dot-path sets, a deep-merge patch object, or both. Refuses to touch id, createdAt and schemaVersion. Values are any JSON type - no string re-encoding. Method: document content comes from stakeholder elicitation (rcf_elicit_requirements prompt), not invention.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -553,7 +554,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_delete',
     title: 'Delete a document',
-    description: 'Deletes a document. Refuses by default when the document has dependents; cascade: true also deletes dependents and drops backrefs. dryRun returns the deletion plan without executing.',
+    description: 'Deletes a document. Refuses by default when the document has dependents; cascade: true also deletes dependents and drops backrefs. dryRun returns the deletion plan without executing. Method: when unsure what hangs off the target, run rcf_impact first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -570,7 +571,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_link',
     title: 'Link a user story to TACs',
-    description: 'Appends one or more TAC ids to a user story\'s tacIds. Idempotent: linking an already-linked TAC is a no-op. Returns the post-state of tacIds.',
+    description: 'Appends one or more TAC ids to a user story\'s tacIds. Idempotent: linking an already-linked TAC is a no-op. Returns the post-state of tacIds. Method: TAC links record the elicited tech layer (TAD / TAC / ADR) of the chain - author it, do not skip it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -587,7 +588,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_unlink',
     title: 'Unlink a user story from TACs',
-    description: 'Removes one or more TAC ids from a user story\'s tacIds. Idempotent: unlinking an absent TAC is a no-op. Returns the post-state of tacIds.',
+    description: 'Removes one or more TAC ids from a user story\'s tacIds. Idempotent: unlinking an absent TAC is a no-op. Returns the post-state of tacIds. Method: keep tech-layer links honest - unlink only what the stakeholder agreed no longer applies.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -604,7 +605,7 @@ const DEFINITIONS = [
   {
     name: 'rcf_build',
     title: 'Assemble an FBS spec bundle',
-    description: 'Assembles the complete spec bundle for one FBS item: the work, queue and dependency context, acceptance criteria with US / REQ ancestry, architectural context, existing test surface and the completion contract. Addresses FBS ids ONLY - the FBS is the queue unit. A blocked item still returns its bundle; blockedBy in the envelope carries the fact as data. Bundle assembly is mechanical: it projects what the tree says and does not judge whether the FBS is well-specified.',
+    description: 'Assembles the complete spec bundle for one FBS item: the work, queue and dependency context, acceptance criteria with US / REQ ancestry, architectural context, existing test surface and the completion contract. Addresses FBS ids ONLY - the FBS is the queue unit. A blocked item still returns its bundle; blockedBy in the envelope carries the fact as data. Bundle assembly is mechanical: it projects what the tree says and does not judge whether the FBS is well-specified. Method: execute the bundle via the five-stage runbook in the rcf_execute_build_cycle prompt (Define, Build, Review, Test, Finalise).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1055,6 +1056,20 @@ export function createToolRegistry({ projectRoot, log }) {
    * @param {unknown} args
    * @returns {Promise<object>}
    */
+  // Theme 1 setup funnel (touchpoint iii): server running, tree present,
+  // but the rcf marker block is absent from the project-root agent
+  // instructions - the session started without the init bootstrap.
+  // Every tool response then carries ONE firm instruction routing back
+  // to `npx rcf init` + a session restart. Cheap file check; a positive
+  // (marker present) is cached for the server-process lifetime so the
+  // notice disappears permanently once setup is complete.
+  let markerSeen = false;
+  async function setupFunnelNotice() {
+    if (markerSeen) return null;
+    markerSeen = await hasAgentMarker(projectRoot);
+    return markerSeen ? null : SETUP_FUNNEL_INSTRUCTION;
+  }
+
   async function call(name, args) {
     const definition = byName.get(name);
     if (!definition) {
@@ -1064,14 +1079,20 @@ export function createToolRegistry({ projectRoot, log }) {
     if (problems.length > 0) {
       return usageErrorResult(`${name}: invalid arguments: ${problems.join('; ')}`);
     }
+    let result;
     try {
-      return await handlers[name](args ?? {});
+      result = await handlers[name](args ?? {});
     } catch (err) {
       // Defensive: pure-layer throws become execution errors with the
       // stack on stderr only.
       const e = /** @type {Error} */ (err);
       return unexpectedFailureResult({ kind: 'ioFailure', message: e.message, stack: e.stack }, log);
     }
+    const notice = await setupFunnelNotice();
+    if (notice) {
+      result = { ...result, content: [...(result.content ?? []), { type: 'text', text: notice }] };
+    }
+    return result;
   }
 
   return { definitions: DEFINITIONS, call };

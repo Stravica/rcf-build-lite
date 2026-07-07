@@ -245,7 +245,9 @@ test('e2e: no project root - exit 2, stderr line, zero stdout traffic', async ()
   // B3 (E2E matrix 2026-07-06-003): an MCP client renders this failure
   // as "zero tools" with no visible error, so the stderr line must be
   // actionable - name the recovery verb and the doc that explains it.
-  assert.match(server.stderr(), /run `rcf init` in the project first/);
+  // Theme 1 funnel: the recovery is `npx rcf init` + a session restart.
+  assert.match(server.stderr(), /run `npx rcf init` in the project first/);
+  assert.match(server.stderr(), /then restart your agent\s+session/);
   assert.match(server.stderr(), /--project-root <path>/);
   assert.match(server.stderr(), /docs\/install\.md, section 7/);
 });

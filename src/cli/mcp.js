@@ -94,10 +94,12 @@ export async function main(argv, deps = {}) {
   if (!projectRoot) {
     // B3 (E2E matrix 2026-07-06-003): an MCP client surfaces this failure
     // as "zero tools" with no visible error, so the stderr line must tell
-    // the operator exactly what to do next.
+    // the operator exactly what to do next. Theme 1 funnel: incomplete
+    // setup always routes to `npx rcf init` + a session restart.
     stderr.write(`[error] usage no project root found (no rcf/manifest.json in ${start} or any ancestor). `
-      + 'The MCP server needs an existing rcf/ tree - run `rcf init` in the project first, '
-      + 'or pass --project-root <path>. See docs/install.md, section 7.\n');
+      + 'The MCP server needs an existing rcf/ tree - run `npx rcf init` in the project first '
+      + '(it wires the tree, .mcp.json and the agent instructions), then restart your agent '
+      + 'session; or pass --project-root <path>. See docs/install.md, section 7.\n');
     return 2;
   }
 
