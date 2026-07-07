@@ -4,7 +4,7 @@
 
 import { parseArgs } from 'node:util';
 
-import { formatErrors, isRcfError, writeUnexpectedFailure } from '../errors/index.js';
+import { isRcfError, writeUnexpectedFailure } from '../errors/index.js';
 import { deleteDocument, walkTree } from '../store/index.js';
 import { findProjectRoot } from '../view/index.js';
 
@@ -58,10 +58,12 @@ export async function main(argv, deps = {}) {
     return 2;
   }
   const walkResult = await walkTree({ projectRoot });
-  // §D9 precedence: broken-tree (exit 3) before dependents (exit 4).
+  // B5 (amends the §D9 broken-tree-before-dependents precedence): a
+  // broken tree no longer blocks delete - deleting the offending doc is
+  // the canonical repair. The writer gates on the POST-write tree state;
+  // only net-new breakage refuses.
   if (walkResult.errors.length > 0) {
-    stderr.write(`${formatErrors(walkResult.errors, { verbose: false, strict: false })}\n`);
-    return 3;
+    stderr.write(`[warn] tree has ${walkResult.errors.length} pre-existing issue(s); proceeding - writes are validated against the post-write state (run 'rcf validate' for details)\n`);
   }
 
   const result = await deleteDocument({
@@ -70,6 +72,7 @@ export async function main(argv, deps = {}) {
       cascade: Boolean(flags.cascade),
       dryRun: Boolean(flags['dry-run']),
     },
+    walkErrors: walkResult.errors,
   });
   if (isRcfError(result)) return handleDeleteError(result, stderr);
   // BUG-005 fix: split the header text between dry-run (future tense,

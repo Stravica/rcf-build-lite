@@ -5,7 +5,7 @@
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 
-import { formatErrors, writeUnexpectedFailure } from '../errors/index.js';
+import { writeUnexpectedFailure } from '../errors/index.js';
 import { createDocument, deriveSlug, walkTree } from '../store/index.js';
 import { findProjectRoot } from '../view/index.js';
 
@@ -96,9 +96,12 @@ export async function main(argv, deps = {}) {
   }
 
   const walkResult = await walkTree({ projectRoot });
+  // B5: pre-existing tree breakage no longer blocks write verbs - the
+  // write is gated on the POST-write tree state inside the writer, so
+  // repairing a broken tree is possible while net-new breakage is still
+  // refused.
   if (walkResult.errors.length > 0) {
-    stderr.write(`${formatErrors(walkResult.errors, { verbose: false, strict: false })}\n`);
-    return 3;
+    stderr.write(`[warn] tree has ${walkResult.errors.length} pre-existing issue(s); proceeding - writes are validated against the post-write state (run 'rcf validate' for details)\n`);
   }
 
   let fileBody = null;
@@ -167,7 +170,7 @@ export async function main(argv, deps = {}) {
   }
 
   const result = await createDocument({
-    projectRoot, tree: walkResult.tree, kind, body, options,
+    projectRoot, tree: walkResult.tree, kind, body, options, walkErrors: walkResult.errors,
   });
   if (isRcfError(result)) {
     return handleWriterError(result, stderr);

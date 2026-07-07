@@ -1,6 +1,9 @@
 // Persistence module for CRUD verbs. Wraps every disk write with
-// schema validation + referential-integrity checks so no verb ever
-// leaves the tree in a schema-broken or referentially-broken state.
+// schema validation + referential-integrity checks, gated on the
+// POST-WRITE tree state (B5 amendment, E2E matrix 2026-07-06-003): a
+// verb never INTRODUCES schema or reference breakage, but pre-existing
+// breakage does not wedge the tree - repairing or deleting a broken doc
+// is always possible in-tool.
 //
 // Four public functions per spec Phase 4 §D11:
 //   nextIdForKind(tree, kind, opts)          -> string
@@ -14,12 +17,13 @@
 // 1..N files and mutate 0..N cross-link-carrying files, never touching
 // parents.
 
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { rcfError } from '../errors/index.js';
 import { pathForId, subdirFor } from './loader.js';
 import { validateDocument } from './validator.js';
+import { netNewErrors, simulateWriteErrors } from './walker.js';
 
 /**
  * @typedef {import('./walker.js').TreeModel} TreeModel
@@ -44,6 +48,68 @@ function canonicalKind(kind) {
   return KIND_ALIASES[kind] ?? kind;
 }
 
+// ---------------------------------------------------------------------------
+// B5: post-write validation gate
+// ---------------------------------------------------------------------------
+//
+// Write verbs validate the POST-WRITE tree state, not the pre-existing
+// state (operator-approved amendment to the Phase-4 refusal semantics,
+// E2E matrix 2026-07-06-003 finding B5). A tree that is already broken
+// no longer wedges every write: repairing a broken doc is allowed,
+// deleting the offending doc is allowed. What stays refused is any
+// operation that would introduce NET-NEW breakage - on a valid tree or
+// a broken one.
+
+/**
+ * Run the operation's change-set through the walker's in-memory
+ * simulation and refuse if any error appears post-write that was not
+ * present pre-write.
+ *
+ * @param {object} args
+ * @param {TreeModel} args.tree
+ * @param {RcfError[]} [args.walkErrors] - pre-write walk errors
+ * @param {Array<{ kind: string, id: string, doc: object }>} [args.upserts]
+ * @param {string[]} [args.deletes]
+ * @param {string} args.verb - for the refusal message
+ * @returns {RcfError | null}
+ */
+function postWriteGate({ tree, walkErrors = [], upserts = [], deletes = [], verb }) {
+  const postErrors = simulateWriteErrors({ tree, preErrors: walkErrors, upserts, deletes });
+  const netNew = netNewErrors(walkErrors, postErrors);
+  if (netNew.length === 0) return null;
+  return rcfError({
+    kind: 'validation',
+    message: `${verb}: refused - the post-write tree would carry new breakage: ${netNew.map((e) => e.message).join('; ')}`,
+    rule: 'postWriteValidation',
+  });
+}
+
+/**
+ * Ids of schema-invalid (unloadable) docs of a given canonical kind.
+ * Considered occupied for id allocation so a repair-pending id is never
+ * silently reallocated (and its file never overwritten).
+ *
+ * @param {TreeModel} tree
+ * @param {string} kind - canonical kind
+ * @returns {string[]}
+ */
+function invalidIdsOfKind(tree, kind) {
+  const out = [];
+  for (const [id, entry] of tree.invalidDocs ?? []) {
+    if (entry.kind === kind) out.push(id);
+  }
+  return out;
+}
+
+async function fileExistsOnDisk(absPath) {
+  try {
+    await stat(absPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Compute the next free id for a given kind. Never reuses freed ids:
  * `max+1` reads the current `tree.byId`; a deletion does not lower
@@ -59,17 +125,20 @@ function canonicalKind(kind) {
  */
 export function nextIdForKind(tree, kind, opts = {}) {
   const k = canonicalKind(kind);
+  // B5: unloadable (schema-invalid) docs are absent from the doc arrays
+  // but their ids are still occupied on disk - include them so an
+  // allocation never collides with a repair-pending file.
   switch (k) {
     case 'req':
-      return nextFlatId('REQ', tree.requirements.map((d) => d.reqId));
+      return nextFlatId('REQ', [...tree.requirements.map((d) => d.reqId), ...invalidIdsOfKind(tree, 'req')]);
     case 'tac':
-      return nextFlatId('TAC', tree.tacs.map((d) => d.tacId));
+      return nextFlatId('TAC', [...tree.tacs.map((d) => d.tacId), ...invalidIdsOfKind(tree, 'tac')]);
     case 'adr':
-      return nextFlatId('ADR', tree.adrs.map((d) => d.adrId));
+      return nextFlatId('ADR', [...tree.adrs.map((d) => d.adrId), ...invalidIdsOfKind(tree, 'adr')]);
     case 'fbs':
-      return nextFlatId('FBS', tree.fbsItems.map((d) => d.fbsId));
+      return nextFlatId('FBS', [...tree.fbsItems.map((d) => d.fbsId), ...invalidIdsOfKind(tree, 'fbs')]);
     case 'testSuite':
-      return nextFlatId('TS', tree.testSuites.map((d) => d.id));
+      return nextFlatId('TS', [...tree.testSuites.map((d) => d.id), ...invalidIdsOfKind(tree, 'testSuite')]);
     case 'userStory': {
       const reqId = opts.parentId;
       const match = /^REQ-(\d+)$/.exec(reqId ?? '');
@@ -77,9 +146,19 @@ export function nextIdForKind(tree, kind, opts = {}) {
         throw new TypeError('nextIdForKind us requires opts.parentId matching REQ-XXX');
       }
       const groupDigit = String(Number(match[1]));
-      const usIds = tree.userStories
-        .filter((us) => us.reqId === reqId)
-        .map((us) => us.usId);
+      const usIds = [
+        ...tree.userStories
+          .filter((us) => us.reqId === reqId)
+          .map((us) => us.usId),
+        // B5: count unloadable US ids that numerically belong to this
+        // REQ's group so a repair-pending id is never reallocated.
+        ...invalidIdsOfKind(tree, 'userStory').filter((invId) => {
+          const mm = /^US-(\d+)$/.exec(invId);
+          if (!mm) return false;
+          const local = Number(mm[1]) - Number(groupDigit) * 100;
+          return local >= 1 && local <= 99;
+        }),
+      ];
       let maxLocal = 0;
       for (const usId of usIds) {
         const mm = /^US-(\d+)$/.exec(usId);
@@ -225,9 +304,10 @@ function pathForRootDoc(projectRoot, kind) {
  * @param {number} [args.options.buildOrder]  - for fbs
  * @param {string} [args.options.slug]        - for tc
  * @param {boolean}[args.options.dryRun]
+ * @param {RcfError[]} [args.walkErrors] - pre-write walk errors (B5 gate)
  * @returns {Promise<{ id: string, filePath: string, body: object } | RcfError>}
  */
-export async function createDocument({ projectRoot, tree, kind, body, options = {} }) {
+export async function createDocument({ projectRoot, tree, kind, body, options = {}, walkErrors = [] }) {
   const canonical = canonicalKind(kind);
   const parentId = options.parentId;
   const parentField = PARENT_FIELD_FOR[canonical];
@@ -235,10 +315,10 @@ export async function createDocument({ projectRoot, tree, kind, body, options = 
 
   // Inline kinds route through mutateInline().
   if (canonical === 'ac') {
-    return await createInlineAc({ projectRoot, tree, options, body });
+    return await createInlineAc({ projectRoot, tree, options, body, walkErrors });
   }
   if (canonical === 'tc') {
-    return await createInlineTc({ projectRoot, tree, options, body });
+    return await createInlineTc({ projectRoot, tree, options, body, walkErrors });
   }
 
   if (!parentField) {
@@ -269,7 +349,8 @@ export async function createDocument({ projectRoot, tree, kind, body, options = 
   // Allocate id (or take the override).
   let id = options.id;
   if (id) {
-    if (tree.byId.has(id)) {
+    // B5: an unloadable (schema-invalid) doc still occupies its id.
+    if (tree.byId.has(id) || tree.invalidDocs?.has(id)) {
       return rcfError({
         kind: 'usage',
         message: `create ${kind}: id ${id} is already taken`,
@@ -352,6 +433,24 @@ export async function createDocument({ projectRoot, tree, kind, body, options = 
   }
 
   const absPath = pathForKindFile(projectRoot, canonical, id);
+  // B5: never silently overwrite an on-disk file that failed to load
+  // entirely (e.g. parse-broken) - such files are absent from both byId
+  // and invalidDocs, so the id checks above cannot see them.
+  if (await fileExistsOnDisk(absPath)) {
+    return rcfError({
+      kind: 'usage',
+      message: `create ${kind}: ${relPath} already exists on disk but did not load; repair or delete it first`,
+      documentId: id,
+      filePath: relPath,
+    });
+  }
+  const gateErr = postWriteGate({
+    tree,
+    walkErrors,
+    upserts: [{ kind: canonical, id, doc: finalBody }],
+    verb: `create ${kind}`,
+  });
+  if (gateErr) return { ...gateErr, documentId: id };
   if (options.dryRun) {
     return { id, filePath: relPath, body: finalBody, dryRun: true };
   }
@@ -520,7 +619,7 @@ function assembleBody({ tree, canonical, id, parentId, body, options }) {
 /**
  * Create an inline AC under a parent US.
  */
-async function createInlineAc({ projectRoot, tree, options, body }) {
+async function createInlineAc({ projectRoot, tree, options, body, walkErrors = [] }) {
   const parentUsId = options.parentId;
   if (typeof parentUsId !== 'string' || parentUsId.length === 0) {
     return rcfError({ kind: 'usage', message: 'create ac: --parent US-XXX is required' });
@@ -563,6 +662,13 @@ async function createInlineAc({ projectRoot, tree, options, body }) {
   const relPath = `rcf/user-stories/${parentUsId.toLowerCase()}.json`;
   const validation = validateDocument({ doc: nextUs, kind: 'userStory', filePath: relPath });
   if (validation) return { ...validation, documentId: parentUsId };
+  const gateErr = postWriteGate({
+    tree,
+    walkErrors,
+    upserts: [{ kind: 'userStory', id: parentUsId, doc: nextUs }],
+    verb: 'create ac',
+  });
+  if (gateErr) return { ...gateErr, documentId: parentUsId };
   if (options.dryRun) {
     return { id: acId, filePath: relPath, parentId: parentUsId, dryRun: true, body: acEntry };
   }
@@ -577,7 +683,7 @@ async function createInlineAc({ projectRoot, tree, options, body }) {
 /**
  * Create an inline TC under a parent TS.
  */
-async function createInlineTc({ projectRoot, tree, options, body }) {
+async function createInlineTc({ projectRoot, tree, options, body, walkErrors = [] }) {
   const parentTsId = options.parentId;
   if (typeof parentTsId !== 'string' || parentTsId.length === 0) {
     return rcfError({ kind: 'usage', message: 'create tc: --parent TS-XXX is required' });
@@ -638,6 +744,13 @@ async function createInlineTc({ projectRoot, tree, options, body }) {
   const relPath = `rcf/test-suites/${parentTsId.toLowerCase()}.json`;
   const validation = validateDocument({ doc: nextTs, kind: 'testSuite', filePath: relPath });
   if (validation) return { ...validation, documentId: parentTsId };
+  const gateErr = postWriteGate({
+    tree,
+    walkErrors,
+    upserts: [{ kind: 'testSuite', id: parentTsId, doc: nextTs }],
+    verb: 'create tc',
+  });
+  if (gateErr) return { ...gateErr, documentId: parentTsId };
   if (options.dryRun) {
     return { id: tcId, filePath: relPath, parentId: parentTsId, dryRun: true, body: tcEntry };
   }
@@ -686,14 +799,15 @@ export function deriveSlug(description) {
  * @param {Array<{ path: string, value: unknown }>} [args.sets] - dot-path assignments
  * @param {object} [args.options]
  * @param {boolean} [args.options.dryRun]
+ * @param {RcfError[]} [args.walkErrors] - pre-write walk errors (B5 gate)
  * @returns {Promise<{ id: string, filePath: string, body: object } | RcfError>}
  */
-export async function updateDocument({ projectRoot, tree, id, patch, sets = [], options = {} }) {
+export async function updateDocument({ projectRoot, tree, id, patch, sets = [], options = {}, walkErrors = [] }) {
   // Inline id resolution.
   const inline = resolveInlineId(id);
   if (inline) {
     return await updateInline({
-      projectRoot, tree, inline, id, patch, sets, options,
+      projectRoot, tree, inline, id, patch, sets, options, walkErrors,
     });
   }
   // Root or child document.
@@ -703,13 +817,16 @@ export async function updateDocument({ projectRoot, tree, id, patch, sets = [], 
   }
   const kind = resolved.kind;
   const rootKinds = new Set(['prd', 'tad', 'buildSequence']);
+  // B5: schema-invalid docs are absent from byId but stay addressable
+  // via invalidDocs - updating one is exactly how a wedged tree gets
+  // repaired (the post-write gate ensures the repair actually repairs).
   let doc;
   if (rootKinds.has(kind)) {
-    doc = tree.byId.get(id) ?? tree[rootKindTreeKey(kind)];
+    doc = tree.byId.get(id) ?? tree[rootKindTreeKey(kind)] ?? tree.invalidDocs?.get(id)?.doc;
   } else if (kind === 'manifest') {
     doc = tree.manifest;
   } else {
-    doc = tree.byId.get(id);
+    doc = tree.byId.get(id) ?? tree.invalidDocs?.get(id)?.doc;
   }
   if (!doc) {
     return rcfError({ kind: 'usage', message: `update: id ${id} not found`, documentId: id });
@@ -752,6 +869,18 @@ export async function updateDocument({ projectRoot, tree, id, patch, sets = [], 
   // referenced id is loaded.
   const refCheck = checkCrossLinks(tree, kind, next, id);
   if (refCheck) return refCheck;
+
+  // B5 gate: the updated doc must not introduce net-new tree breakage
+  // (e.g. dropping an AC that a surviving FBS / TS still references).
+  if (kind !== 'manifest') {
+    const gateErr = postWriteGate({
+      tree,
+      walkErrors,
+      upserts: [{ kind, id, doc: next }],
+      verb: 'update',
+    });
+    if (gateErr) return { ...gateErr, documentId: id };
+  }
 
   const absPath = kind === 'manifest'
     ? pathForRootDoc(projectRoot, 'manifest')
@@ -829,7 +958,7 @@ function resolveInlineId(id) {
 /**
  * Update an inline AC or TC by mutating its parent document.
  */
-async function updateInline({ projectRoot, tree, inline, id, patch, sets, options }) {
+async function updateInline({ projectRoot, tree, inline, id, patch, sets, options, walkErrors = [] }) {
   const parentId = tree.parentByChild.get(id);
   if (!parentId) {
     return rcfError({ kind: 'usage', message: `update: inline id ${id} has no resolvable parent`, documentId: id });
@@ -863,6 +992,13 @@ async function updateInline({ projectRoot, tree, inline, id, patch, sets, option
   const relPath = `rcf/${subdirFor(kind)}/${parentId.toLowerCase()}.json`;
   const validation = validateDocument({ doc: nextParent, kind, filePath: relPath });
   if (validation) return { ...validation, documentId: parentId };
+  const gateErr = postWriteGate({
+    tree,
+    walkErrors,
+    upserts: [{ kind, id: parentId, doc: nextParent }],
+    verb: 'update',
+  });
+  if (gateErr) return { ...gateErr, documentId: parentId };
   if (options.dryRun) {
     return { id, filePath: relPath, parentId, body: entry, dryRun: true };
   }
@@ -894,12 +1030,13 @@ async function updateInline({ projectRoot, tree, inline, id, patch, sets, option
  * @param {object} [args.options]
  * @param {boolean}[args.options.cascade]
  * @param {boolean}[args.options.dryRun]
+ * @param {RcfError[]} [args.walkErrors] - pre-write walk errors (B5 gate)
  * @returns {Promise<{ deleted: string[], mutated: Array<{ id: string, filePath: string }>, plan: string[] } | RcfError>}
  */
-export async function deleteDocument({ projectRoot, tree, id, options = {} }) {
+export async function deleteDocument({ projectRoot, tree, id, options = {}, walkErrors = [] }) {
   const inline = resolveInlineId(id);
   if (inline) {
-    return await deleteInline({ projectRoot, tree, inline, id, options });
+    return await deleteInline({ projectRoot, tree, inline, id, options, walkErrors });
   }
   const resolved = pathForId(id);
   if (!resolved) {
@@ -916,24 +1053,43 @@ export async function deleteDocument({ projectRoot, tree, id, options = {} }) {
   }
   const doc = tree.byId.get(id);
   if (!doc) {
+    // B5: the doc may exist on disk but have failed to load (schema-
+    // invalid or parse-broken). Deleting it is the canonical escape from
+    // a wedged tree; a delete is never blocked by validation errors
+    // attributable solely to the doc being deleted. The post-write gate
+    // still refuses if removing the file would introduce NET-NEW
+    // breakage elsewhere.
+    const invalid = tree.invalidDocs?.get(id);
+    const absPath = pathForKindFile(projectRoot, kind, id);
+    if (invalid || await fileExistsOnDisk(absPath)) {
+      const gateErr = postWriteGate({ tree, walkErrors, deletes: [id], verb: 'delete' });
+      if (gateErr) return gateErr;
+      const relPath = relativePathForChild(kind, id);
+      if (!options.dryRun) {
+        try { await unlink(absPath); } catch (err) {
+          return rcfError({ kind: 'ioFailure', message: `delete: unlink failed: ${err.message}`, filePath: relPath, stack: err.stack });
+        }
+      }
+      return { deleted: [id], mutated: [], plan: [`delete ${relPath}`] };
+    }
     return rcfError({ kind: 'usage', message: `delete: id ${id} not found`, documentId: id });
   }
 
   const cascade = Boolean(options.cascade);
 
   switch (kind) {
-    case 'req': return await deleteReq({ projectRoot, tree, id, cascade, options });
-    case 'userStory': return await deleteUs({ projectRoot, tree, id, cascade, options });
-    case 'tac': return await deleteTac({ projectRoot, tree, id, cascade, options });
-    case 'adr': return await deleteAdr({ projectRoot, tree, id, options });
-    case 'fbs': return await deleteFbs({ projectRoot, tree, id, cascade, options });
-    case 'testSuite': return await deleteTs({ projectRoot, tree, id, options });
+    case 'req': return await deleteReq({ projectRoot, tree, id, cascade, options, walkErrors });
+    case 'userStory': return await deleteUs({ projectRoot, tree, id, cascade, options, walkErrors });
+    case 'tac': return await deleteTac({ projectRoot, tree, id, cascade, options, walkErrors });
+    case 'adr': return await deleteAdr({ projectRoot, tree, id, options, walkErrors });
+    case 'fbs': return await deleteFbs({ projectRoot, tree, id, cascade, options, walkErrors });
+    case 'testSuite': return await deleteTs({ projectRoot, tree, id, options, walkErrors });
     default:
       return rcfError({ kind: 'usage', message: `delete: unsupported kind ${kind}`, documentId: id });
   }
 }
 
-async function deleteReq({ projectRoot, tree, id, cascade, options }) {
+async function deleteReq({ projectRoot, tree, id, cascade, options, walkErrors = [] }) {
   // Discover: child US ids via childrenByParent.
   const childUsIds = (tree.childrenByParent.get(id) ?? []).filter((cid) => tree.kindById.get(cid) === 'userStory');
   // Discover: TS ids under each child US.
@@ -960,10 +1116,11 @@ async function deleteReq({ projectRoot, tree, id, cascade, options }) {
     toDelete: [id, ...childUsIds, ...tsIds],
     collectedAcIds,
     options,
+    walkErrors,
   });
 }
 
-async function deleteUs({ projectRoot, tree, id, cascade, options }) {
+async function deleteUs({ projectRoot, tree, id, cascade, options, walkErrors = [] }) {
   const us = tree.byId.get(id);
   const collectedAcIds = new Set((us.acceptanceCriteria ?? []).map((ac) => ac.id));
   const childTsIds = (tree.childrenByParent.get(id) ?? []).filter((cid) => tree.kindById.get(cid) === 'testSuite');
@@ -977,15 +1134,18 @@ async function deleteUs({ projectRoot, tree, id, cascade, options }) {
     toDelete: [id, ...childTsIds],
     collectedAcIds,
     options,
+    walkErrors,
   });
 }
 
-async function deleteTac({ projectRoot, tree, id, cascade, options }) {
+async function deleteTac({ projectRoot, tree, id, cascade, options, walkErrors = [] }) {
   const dependents = (tree.usByTacId.get(id) ?? []).slice();
   if (!cascade && dependents.length > 0) {
     return refuseWithDependents(id, { usDependents: dependents });
   }
-  const mutated = [];
+  // Two-phase (B5): compute every mutation first, gate the whole
+  // change-set on the post-write tree state, then flush.
+  const pending = [];
   if (cascade) {
     for (const usId of dependents) {
       const us = tree.byId.get(usId);
@@ -994,9 +1154,21 @@ async function deleteTac({ projectRoot, tree, id, cascade, options }) {
       const relPath = `rcf/user-stories/${usId.toLowerCase()}.json`;
       const validation = validateDocument({ doc: next, kind: 'userStory', filePath: relPath });
       if (validation) return { ...validation, documentId: usId };
-      if (!options.dryRun) await writeJsonAtomic(pathForKindFile(projectRoot, 'userStory', usId), next);
-      mutated.push({ id: usId, filePath: relPath });
+      pending.push({ kind: 'userStory', id: usId, doc: next, relPath });
     }
+  }
+  const gateErr = postWriteGate({
+    tree,
+    walkErrors,
+    upserts: pending.map((p) => ({ kind: p.kind, id: p.id, doc: p.doc })),
+    deletes: [id],
+    verb: 'delete',
+  });
+  if (gateErr) return gateErr;
+  const mutated = [];
+  for (const p of pending) {
+    if (!options.dryRun) await writeJsonAtomic(pathForKindFile(projectRoot, p.kind, p.id), p.doc);
+    mutated.push({ id: p.id, filePath: p.relPath });
   }
   // Delete the TAC file.
   const tacRel = `rcf/tacs/${id.toLowerCase()}.json`;
@@ -1008,7 +1180,9 @@ async function deleteTac({ projectRoot, tree, id, cascade, options }) {
   return { deleted: [id], mutated, plan: buildPlanLines([id], mutated) };
 }
 
-async function deleteAdr({ projectRoot, tree, id, options }) {
+async function deleteAdr({ projectRoot, tree, id, options, walkErrors = [] }) {
+  const gateErr = postWriteGate({ tree, walkErrors, deletes: [id], verb: 'delete' });
+  if (gateErr) return gateErr;
   const adrRel = `rcf/adrs/${id.toLowerCase()}.json`;
   if (!options.dryRun) {
     try { await unlink(pathForKindFile(projectRoot, 'adr', id)); } catch (err) {
@@ -1018,12 +1192,12 @@ async function deleteAdr({ projectRoot, tree, id, options }) {
   return { deleted: [id], mutated: [], plan: [`delete ${adrRel}`] };
 }
 
-async function deleteFbs({ projectRoot, tree, id, cascade, options }) {
+async function deleteFbs({ projectRoot, tree, id, cascade, options, walkErrors = [] }) {
   const dependents = (tree.dependentsByFbsId.get(id) ?? []).slice();
   if (!cascade && dependents.length > 0) {
     return refuseWithDependents(id, { fbsDependents: dependents });
   }
-  const mutated = [];
+  const pending = [];
   if (cascade) {
     for (const depFbsId of dependents) {
       const dep = tree.byId.get(depFbsId);
@@ -1035,9 +1209,21 @@ async function deleteFbs({ projectRoot, tree, id, cascade, options }) {
       const relPath = `rcf/fbs/${depFbsId.toLowerCase()}.json`;
       const validation = validateDocument({ doc: next, kind: 'fbs', filePath: relPath });
       if (validation) return { ...validation, documentId: depFbsId };
-      if (!options.dryRun) await writeJsonAtomic(pathForKindFile(projectRoot, 'fbs', depFbsId), next);
-      mutated.push({ id: depFbsId, filePath: relPath });
+      pending.push({ kind: 'fbs', id: depFbsId, doc: next, relPath });
     }
+  }
+  const gateErr = postWriteGate({
+    tree,
+    walkErrors,
+    upserts: pending.map((p) => ({ kind: p.kind, id: p.id, doc: p.doc })),
+    deletes: [id],
+    verb: 'delete',
+  });
+  if (gateErr) return gateErr;
+  const mutated = [];
+  for (const p of pending) {
+    if (!options.dryRun) await writeJsonAtomic(pathForKindFile(projectRoot, p.kind, p.id), p.doc);
+    mutated.push({ id: p.id, filePath: p.relPath });
   }
   const fbsRel = `rcf/fbs/${id.toLowerCase()}.json`;
   if (!options.dryRun) {
@@ -1048,7 +1234,9 @@ async function deleteFbs({ projectRoot, tree, id, cascade, options }) {
   return { deleted: [id], mutated, plan: buildPlanLines([id], mutated) };
 }
 
-async function deleteTs({ projectRoot, tree, id, options }) {
+async function deleteTs({ projectRoot, tree, id, options, walkErrors = [] }) {
+  const gateErr = postWriteGate({ tree, walkErrors, deletes: [id], verb: 'delete' });
+  if (gateErr) return gateErr;
   const tsRel = `rcf/test-suites/${id.toLowerCase()}.json`;
   if (!options.dryRun) {
     try { await unlink(pathForKindFile(projectRoot, 'testSuite', id)); } catch (err) {
@@ -1063,7 +1251,7 @@ async function deleteTs({ projectRoot, tree, id, options }) {
  * cross-link dependents; --cascade opts in and mutates FBS/TS acIds
  * accordingly (with an orphan-refuse pre-plan check per §D9).
  */
-async function deleteInline({ projectRoot, tree, inline, id, options }) {
+async function deleteInline({ projectRoot, tree, inline, id, options, walkErrors = [] }) {
   const parentId = tree.parentByChild.get(id);
   if (!parentId) {
     return rcfError({ kind: 'usage', message: `delete: inline ${id} has no resolvable parent`, documentId: id });
@@ -1085,7 +1273,7 @@ async function deleteInline({ projectRoot, tree, inline, id, options }) {
     // No cross-refs to worry about (§D9 TC clause). Just drop the entry.
     const nextEntries = [...entries.slice(0, idx), ...entries.slice(idx + 1)];
     return await writeInlineParent({
-      projectRoot, tree, parent, parentId, arrayField, nextEntries, options,
+      projectRoot, tree, walkErrors, parent, parentId, arrayField, nextEntries, options, deletedInlineIds: [id],
     });
   }
   // AC path: check cross-refs and orphan-refuse.
@@ -1105,8 +1293,9 @@ async function deleteInline({ projectRoot, tree, inline, id, options }) {
       rule: 'wouldOrphan',
     });
   }
-  // Cascade path: simulate FBS/TS acIds mutations, orphan-refuse.
-  const mutated = [];
+  // Cascade path: compute FBS/TS acIds mutations (no writes yet - the
+  // whole change-set is gated in writeInlineParent), orphan-refuse.
+  const pending = [];
   if (options.cascade) {
     const orphanCheck = checkAcOrphans(tree, [id]);
     if (orphanCheck) return orphanCheck;
@@ -1117,8 +1306,7 @@ async function deleteInline({ projectRoot, tree, inline, id, options }) {
       const relPath = `rcf/fbs/${fbsId.toLowerCase()}.json`;
       const validation = validateDocument({ doc: next, kind: 'fbs', filePath: relPath });
       if (validation) return { ...validation, documentId: fbsId };
-      if (!options.dryRun) await writeJsonAtomic(pathForKindFile(projectRoot, 'fbs', fbsId), next);
-      mutated.push({ id: fbsId, filePath: relPath });
+      pending.push({ kind: 'fbs', id: fbsId, doc: next, relPath });
     }
     for (const tsId of dependentTs) {
       const ts = tree.byId.get(tsId);
@@ -1127,34 +1315,50 @@ async function deleteInline({ projectRoot, tree, inline, id, options }) {
       const relPath = `rcf/test-suites/${tsId.toLowerCase()}.json`;
       const validation = validateDocument({ doc: next, kind: 'testSuite', filePath: relPath });
       if (validation) return { ...validation, documentId: tsId };
-      if (!options.dryRun) await writeJsonAtomic(pathForKindFile(projectRoot, 'testSuite', tsId), next);
-      mutated.push({ id: tsId, filePath: relPath });
+      pending.push({ kind: 'testSuite', id: tsId, doc: next, relPath });
     }
   }
   return await writeInlineParent({
-    projectRoot, tree, parent, parentId, arrayField, nextEntries, options, precomputedMutated: mutated, deletedInlineIds: [id],
+    projectRoot, tree, walkErrors, parent, parentId, arrayField, nextEntries, options, pendingMutations: pending, deletedInlineIds: [id],
   });
 }
 
 async function writeInlineParent({
-  projectRoot, tree, parent, parentId, arrayField, nextEntries, options,
-  precomputedMutated = [], deletedInlineIds = [],
+  projectRoot, tree, walkErrors = [], parent, parentId, arrayField, nextEntries, options,
+  pendingMutations = [], deletedInlineIds = [],
 }) {
   const parentKind = tree.kindById.get(parentId);
   const next = { ...parent, [arrayField]: nextEntries, updatedAt: nowIso() };
   const relPath = `rcf/${subdirFor(parentKind)}/${parentId.toLowerCase()}.json`;
   const validation = validateDocument({ doc: next, kind: parentKind, filePath: relPath });
   if (validation) return { ...validation, documentId: parentId };
+  // B5 gate over the whole change-set (cascade mutations + parent edit).
+  const gateErr = postWriteGate({
+    tree,
+    walkErrors,
+    upserts: [
+      ...pendingMutations.map((m) => ({ kind: m.kind, id: m.id, doc: m.doc })),
+      { kind: parentKind, id: parentId, doc: next },
+    ],
+    verb: 'delete',
+  });
+  if (gateErr) return gateErr;
   if (!options.dryRun) {
     try {
+      for (const m of pendingMutations) {
+        await writeJsonAtomic(pathForKindFile(projectRoot, m.kind, m.id), m.doc);
+      }
       await writeJsonAtomic(pathForKindFile(projectRoot, parentKind, parentId), next);
     } catch (err) {
       return rcfError({ kind: 'ioFailure', message: `delete: write failed: ${err.message}`, filePath: relPath, stack: err.stack });
     }
   }
-  const mutated = [...precomputedMutated, { id: parentId, filePath: relPath }];
+  const mutated = [
+    ...pendingMutations.map((m) => ({ id: m.id, filePath: m.relPath })),
+    { id: parentId, filePath: relPath },
+  ];
   const plan = [
-    ...precomputedMutated.map((m) => `mutate ${m.filePath}`),
+    ...pendingMutations.map((m) => `mutate ${m.relPath}`),
     `mutate ${relPath} (drop inline entries)`,
   ];
   return { deleted: [...deletedInlineIds], mutated, plan };
@@ -1166,13 +1370,13 @@ async function writeInlineParent({
  * refuses the whole cascade if any surviving FBS/TS would fall below
  * minItems:1.
  */
-async function executeCascade({ projectRoot, tree, toDelete, collectedAcIds, options }) {
+async function executeCascade({ projectRoot, tree, toDelete, collectedAcIds, options, walkErrors = [] }) {
   const deletingSet = new Set(toDelete);
   const orphanCheck = checkAcOrphans(tree, [...collectedAcIds], deletingSet);
   if (orphanCheck) return orphanCheck;
 
-  const mutated = [];
-  // For each surviving FBS that references any collected AC, mutate acIds.
+  // Two-phase (B5): compute every surviving-doc mutation, gate the whole
+  // change-set on the post-write tree state, then flush writes + unlinks.
   const affectedFbs = new Map();
   const affectedTs = new Map();
   for (const acId of collectedAcIds) {
@@ -1189,21 +1393,33 @@ async function executeCascade({ projectRoot, tree, toDelete, collectedAcIds, opt
       affectedTs.set(tsId, ts);
     }
   }
+  const pending = [];
   for (const [fbsId, fbs] of affectedFbs) {
     fbs.updatedAt = nowIso();
     const relPath = `rcf/fbs/${fbsId.toLowerCase()}.json`;
     const validation = validateDocument({ doc: fbs, kind: 'fbs', filePath: relPath });
     if (validation) return { ...validation, documentId: fbsId };
-    if (!options.dryRun) await writeJsonAtomic(pathForKindFile(projectRoot, 'fbs', fbsId), fbs);
-    mutated.push({ id: fbsId, filePath: relPath });
+    pending.push({ kind: 'fbs', id: fbsId, doc: fbs, relPath });
   }
   for (const [tsId, ts] of affectedTs) {
     ts.updatedAt = nowIso();
     const relPath = `rcf/test-suites/${tsId.toLowerCase()}.json`;
     const validation = validateDocument({ doc: ts, kind: 'testSuite', filePath: relPath });
     if (validation) return { ...validation, documentId: tsId };
-    if (!options.dryRun) await writeJsonAtomic(pathForKindFile(projectRoot, 'testSuite', tsId), ts);
-    mutated.push({ id: tsId, filePath: relPath });
+    pending.push({ kind: 'testSuite', id: tsId, doc: ts, relPath });
+  }
+  const gateErr = postWriteGate({
+    tree,
+    walkErrors,
+    upserts: pending.map((p) => ({ kind: p.kind, id: p.id, doc: p.doc })),
+    deletes: toDelete,
+    verb: 'delete',
+  });
+  if (gateErr) return gateErr;
+  const mutated = [];
+  for (const p of pending) {
+    if (!options.dryRun) await writeJsonAtomic(pathForKindFile(projectRoot, p.kind, p.id), p.doc);
+    mutated.push({ id: p.id, filePath: p.relPath });
   }
   // Then unlink every file in the toDelete list (leaves first: reverse order).
   const deleted = [];

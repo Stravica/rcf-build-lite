@@ -67,9 +67,11 @@ export function usageErrorResult(message, extras = {}) {
 }
 
 /**
- * D10 row: walker errors block a query / write. The tree is broken;
- * the agent's next move is fixing it, so it gets the full
- * validate-shaped issue list.
+ * D10 row: walker errors block a QUERY. The tree is broken; the agent's
+ * next move is fixing it, so it gets the full validate-shaped issue
+ * list. Write tools no longer route here (B5): they proceed and gate on
+ * the post-write tree state instead - that is how a broken tree gets
+ * fixed in-tool.
  *
  * @param {import('../errors/index.js').RcfError[]} errors
  * @returns {object}

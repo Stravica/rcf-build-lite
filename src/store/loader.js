@@ -137,7 +137,10 @@ export async function loadDocument({ projectRoot, id }) {
     filePath: `rcf/${resolved.relPath}`,
   });
   if (validationError) {
-    return { ...validationError, documentId: id };
+    // B5 (post-write validation): the parsed body rides along on the
+    // error so the walker can keep schema-invalid documents addressable
+    // (tree.invalidDocs) - a wedged doc must stay repairable/deletable.
+    return { ...validationError, documentId: id, doc, raw };
   }
   return { doc, raw, kind: resolved.kind, filePath: `rcf/${resolved.relPath}` };
 }
@@ -198,6 +201,7 @@ export async function loadRootDocument({ projectRoot, kind }) {
     kind,
     filePath: `rcf/${relPath}`,
   });
-  if (validationError) return validationError;
+  // B5: parsed body rides along on validation errors (see loadDocument).
+  if (validationError) return { ...validationError, doc, raw };
   return { doc, raw, kind, filePath: `rcf/${relPath}` };
 }

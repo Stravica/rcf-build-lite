@@ -5,7 +5,6 @@
 import { parseArgs } from 'node:util';
 
 import { isRcfError } from '../errors/index.js';
-import { formatErrors } from '../errors/index.js';
 import { updateDocument, walkTree } from '../store/index.js';
 import { findProjectRoot } from '../view/index.js';
 
@@ -56,9 +55,10 @@ export async function main(argv, deps = {}) {
     return 2;
   }
   const walkResult = await walkTree({ projectRoot });
+  // B5: pre-existing tree breakage no longer blocks write verbs - the
+  // write is gated on the POST-write tree state inside the writer.
   if (walkResult.errors.length > 0) {
-    stderr.write(`${formatErrors(walkResult.errors, { verbose: false, strict: false })}\n`);
-    return 3;
+    stderr.write(`[warn] tree has ${walkResult.errors.length} pre-existing issue(s); proceeding - writes are validated against the post-write state (run 'rcf validate' for details)\n`);
   }
   const us = walkResult.tree.byId.get(usId);
   if (!us || walkResult.tree.kindById.get(usId) !== 'userStory') {
@@ -89,6 +89,7 @@ export async function main(argv, deps = {}) {
     patch: next.length === 0 ? { tacIds: [] } : { tacIds: next },
     sets: [],
     options: { dryRun: Boolean(flags['dry-run']) },
+    walkErrors: walkResult.errors,
   });
   if (isRcfError(result)) {
     stderr.write(`[error] ${result.kind} ${result.message}\n`);

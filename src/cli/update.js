@@ -6,7 +6,7 @@
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 
-import { formatErrors, isRcfError, writeUnexpectedFailure } from '../errors/index.js';
+import { isRcfError, writeUnexpectedFailure } from '../errors/index.js';
 import { updateDocument, walkTree } from '../store/index.js';
 import { findProjectRoot } from '../view/index.js';
 
@@ -66,9 +66,11 @@ export async function main(argv, deps = {}) {
   }
 
   const walkResult = await walkTree({ projectRoot });
+  // B5: pre-existing tree breakage no longer blocks write verbs - the
+  // update is gated on the POST-write tree state inside the writer, so
+  // repairing a broken doc is exactly what this verb is now for.
   if (walkResult.errors.length > 0) {
-    stderr.write(`${formatErrors(walkResult.errors, { verbose: false, strict: false })}\n`);
-    return 3;
+    stderr.write(`[warn] tree has ${walkResult.errors.length} pre-existing issue(s); proceeding - writes are validated against the post-write state (run 'rcf validate' for details)\n`);
   }
 
   const sets = [];
@@ -106,6 +108,7 @@ export async function main(argv, deps = {}) {
   const result = await updateDocument({
     projectRoot, tree: walkResult.tree, id, patch, sets,
     options: { dryRun: Boolean(flags['dry-run']) },
+    walkErrors: walkResult.errors,
   });
   if (isRcfError(result)) return handleWriterError(result, stderr);
   if (flags['dry-run']) {
