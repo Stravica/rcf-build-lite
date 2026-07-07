@@ -16,7 +16,8 @@
 // `dependentsByFbsId`, `tsByAcId`, `tcsByAcId`, `usByTacId`.
 
 import { rcfError } from '../errors/index.js';
-import { listSubdirJsonFiles, loadDocument, loadRootDocument, subdirFor } from './loader.js';
+import { listSubdirJsonFiles, loadDocument, loadRootDocument, pathForId, subdirFor } from './loader.js';
+import { validateDocument } from './validator.js';
 
 /**
  * @typedef {object} TreeModel
@@ -86,6 +87,11 @@ function newTree() {
     rawById: new Map(),
     kindById: new Map(),
     brokenIds: new Set(),
+    // B5: schema-invalid (but parseable) documents, keyed by id. These
+    // are EXCLUDED from byId / the doc arrays / the inversion maps, but
+    // stay addressable so the write verbs can repair or delete them
+    // (post-write validation semantics; the TS-003 wedge).
+    invalidDocs: new Map(),
     parentByChild: new Map(),
     childrenByParent: new Map(),
     fbsByAcId: new Map(),
@@ -126,7 +132,18 @@ function recordDoc(tree, id, doc, raw, kind) {
 async function loadRoot(kind, { projectRoot, tree, errors }) {
   const result = await loadRootDocument({ projectRoot, kind });
   if ('kind' in result && result.kind !== kind) {
-    errors.push(result);
+    // Keep the error payload clean for downstream consumers; the parsed
+    // body (present on validation errors) lands in tree.invalidDocs.
+    const { doc: invalidDoc, raw: invalidRaw, ...cleanError } = result;
+    void invalidRaw;
+    errors.push(cleanError);
+    if (result.kind === 'validation' && invalidDoc && typeof invalidDoc === 'object') {
+      const invalidId = idOfDoc(invalidDoc, kind);
+      if (invalidId) {
+        tree.invalidDocs.set(invalidId, { kind, doc: invalidDoc });
+        tree.brokenIds.add(invalidId);
+      }
+    }
     return null;
   }
   const id = idOfDoc(result.doc, kind);
@@ -153,8 +170,14 @@ async function loadChildKind(kind, { projectRoot, tree, errors }) {
     const id = stem.toUpperCase();
     const loaded = await loadDocument({ projectRoot, id });
     if ('kind' in loaded && loaded.kind !== kind) {
-      errors.push(loaded);
+      const { doc: invalidDoc, raw: invalidRaw, ...cleanError } = loaded;
+      void invalidRaw;
+      errors.push(cleanError);
       tree.brokenIds.add(id);
+      // B5: schema-invalid docs stay addressable for repair / delete.
+      if (loaded.kind === 'validation' && invalidDoc && typeof invalidDoc === 'object') {
+        tree.invalidDocs.set(id, { kind, doc: invalidDoc });
+      }
       continue;
     }
     recordDoc(tree, id, loaded.doc, loaded.raw, kind);
@@ -300,6 +323,126 @@ function invertGraph(tree) {
   for (const map of [tree.fbsByAcId, tree.dependentsByFbsId, tree.tsByAcId, tree.usByTacId]) {
     for (const [k, list] of map) map.set(k, [...list].sort());
   }
+}
+
+// ---------------------------------------------------------------------------
+// B5: post-write tree-state simulation
+// ---------------------------------------------------------------------------
+
+const ROOT_REL_BY_KIND = {
+  prd: 'prd.json',
+  tad: 'tad.json',
+  buildSequence: 'build-sequence.json',
+};
+
+function relPathForEntry(kind, id) {
+  const rootRel = ROOT_REL_BY_KIND[kind];
+  if (rootRel) return `rcf/${rootRel}`;
+  const sub = subdirFor(kind);
+  return `rcf/${sub}/${id.toLowerCase()}.json`;
+}
+
+/**
+ * Compute the error set the walker WOULD report if the given upserts /
+ * deletes were applied to the tree - without touching disk. This is the
+ * core of the B5 post-write validation semantics: write verbs no longer
+ * refuse because the current tree is invalid; they refuse only when the
+ * operation would introduce breakage that was not already present.
+ *
+ * Schema validation and referential integrity are recomputed in memory
+ * with exactly the walker's own logic. Load-level errors that cannot be
+ * recomputed without disk (parseFailure / missingFile / ioFailure) are
+ * carried forward from `preErrors`, minus any attributable to a file
+ * this operation touches (e.g. deleting a parse-broken file removes its
+ * parseFailure).
+ *
+ * @param {object} args
+ * @param {TreeModel} args.tree - the pre-write tree (walkTree output)
+ * @param {import('../errors/index.js').RcfError[]} [args.preErrors]
+ * @param {Array<{ kind: string, id: string, doc: object }>} [args.upserts]
+ * @param {string[]} [args.deletes] - document ids removed by the operation
+ * @returns {import('../errors/index.js').RcfError[]} post-write error set
+ */
+export function simulateWriteErrors({ tree, preErrors = [], upserts = [], deletes = [] }) {
+  /** @type {Map<string, { kind: string, doc: object }>} */
+  const entries = new Map();
+  for (const [id, doc] of tree.byId) {
+    const kind = tree.kindById.get(id);
+    if (!kind) continue;
+    entries.set(id, { kind, doc });
+  }
+  for (const [id, invalid] of tree.invalidDocs ?? []) {
+    if (!entries.has(id)) entries.set(id, { kind: invalid.kind, doc: invalid.doc });
+  }
+
+  const touchedPaths = new Set();
+  for (const up of upserts) {
+    entries.set(up.id, { kind: up.kind, doc: up.doc });
+    touchedPaths.add(relPathForEntry(up.kind, up.id));
+  }
+  for (const id of deletes) {
+    const existing = entries.get(id);
+    if (existing) {
+      touchedPaths.add(relPathForEntry(existing.kind, id));
+      entries.delete(id);
+    } else {
+      // Not loadable at all (e.g. parse-broken file being unlinked):
+      // resolve its conventional path so carried-forward load errors drop.
+      const resolved = pathForId(id);
+      if (resolved) touchedPaths.add(`rcf/${resolved.relPath}`);
+    }
+  }
+
+  // Rebuild the tree model in memory, mirroring walkTree: schema-validate
+  // every entry, keep valid ones, then invert and integrity-check.
+  const post = newTree();
+  post.manifest = tree.manifest;
+  /** @type {import('../errors/index.js').RcfError[]} */
+  const errors = [];
+  for (const [id, entry] of entries) {
+    const filePath = relPathForEntry(entry.kind, id);
+    const validation = validateDocument({ doc: entry.doc, kind: entry.kind, filePath });
+    if (validation) {
+      errors.push({ ...validation, documentId: id });
+      post.brokenIds.add(id);
+      continue;
+    }
+    recordDoc(post, id, entry.doc, tree.rawById.get(id) ?? '', entry.kind);
+    if (entry.kind === 'prd') post.prd = entry.doc;
+    else if (entry.kind === 'tad') post.tad = entry.doc;
+    else if (entry.kind === 'buildSequence') post.bs = entry.doc;
+  }
+  post.requirements = sortById(post.requirements, 'reqId');
+  post.userStories = sortById(post.userStories, 'usId');
+  post.tacs = sortById(post.tacs, 'tacId');
+  post.adrs = sortById(post.adrs, 'adrId');
+  post.fbsItems = sortById(post.fbsItems, 'fbsId');
+  post.testSuites = sortById(post.testSuites, 'id');
+  invertGraph(post);
+  collectBrokenReferences(post, errors);
+
+  for (const err of preErrors) {
+    if (err.kind === 'parseFailure' || err.kind === 'missingFile' || err.kind === 'ioFailure') {
+      if (err.filePath && touchedPaths.has(err.filePath)) continue;
+      errors.push(err);
+    }
+  }
+  return errors;
+}
+
+/**
+ * The errors present post-write that were not present pre-write.
+ * Identity is the full structured tuple; message text is included so two
+ * distinct breakages on the same document do not collapse.
+ *
+ * @param {import('../errors/index.js').RcfError[]} preErrors
+ * @param {import('../errors/index.js').RcfError[]} postErrors
+ * @returns {import('../errors/index.js').RcfError[]}
+ */
+export function netNewErrors(preErrors, postErrors) {
+  const keyOf = (e) => JSON.stringify([e.kind, e.documentId ?? null, e.filePath ?? null, e.field ?? null, e.rule ?? null, e.message]);
+  const pre = new Set(preErrors.map(keyOf));
+  return postErrors.filter((e) => !pre.has(keyOf(e)));
 }
 
 // Kind lookups use `tree.kindById` (populated at load time). This helper is

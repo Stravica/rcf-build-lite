@@ -859,8 +859,10 @@ export function createToolRegistry({ projectRoot, log }) {
     },
 
     rcf_create: async (args) => {
+      // B5: pre-existing tree breakage no longer blocks write tools -
+      // the writer gates on the POST-write tree state (net-new breakage
+      // still refuses; repairing a broken tree is allowed).
       const { tree, errors } = await walkTree({ projectRoot });
-      if (errors.length > 0) return walkerBlockedResult(errors);
       const kind = args.kind;
       const body = { ...(args.body ?? {}) };
       if (args.title !== undefined) body.title = args.title;
@@ -901,7 +903,7 @@ export function createToolRegistry({ projectRoot, log }) {
         if (args.testPointer !== undefined) options.testPointer = args.testPointer;
       }
 
-      const result = await createDocument({ projectRoot, tree, kind, body, options });
+      const result = await createDocument({ projectRoot, tree, kind, body, options, walkErrors: errors });
       if (isRcfError(result)) return writerErrorResult(result, log);
       return okResult({
         ok: true,
@@ -913,8 +915,8 @@ export function createToolRegistry({ projectRoot, log }) {
     },
 
     rcf_update: async (args) => {
+      // B5: no pre-write walk gate - repairing a broken doc IS an update.
       const { tree, errors } = await walkTree({ projectRoot });
-      if (errors.length > 0) return walkerBlockedResult(errors);
       const sets = args.sets ?? [];
       const patch = args.patch ?? null;
       if (sets.length === 0 && !patch) {
@@ -927,6 +929,7 @@ export function createToolRegistry({ projectRoot, log }) {
         patch,
         sets,
         options: { dryRun: Boolean(args.dryRun) },
+        walkErrors: errors,
       });
       if (isRcfError(result)) return writerErrorResult(result, log);
       const changedPaths = [
@@ -943,14 +946,16 @@ export function createToolRegistry({ projectRoot, log }) {
     },
 
     rcf_delete: async (args) => {
+      // B5: no pre-write walk gate - deleting the offending doc is the
+      // canonical repair for a wedged tree.
       const { tree, errors } = await walkTree({ projectRoot });
-      if (errors.length > 0) return walkerBlockedResult(errors);
       const dryRun = Boolean(args.dryRun);
       const result = await deleteDocument({
         projectRoot,
         tree,
         id: args.id,
         options: { cascade: Boolean(args.cascade), dryRun },
+        walkErrors: errors,
       });
       if (isRcfError(result)) return writerErrorResult(result, log);
       return okResult({
@@ -997,8 +1002,8 @@ export function createToolRegistry({ projectRoot, log }) {
   };
 
   async function linkHandler(args, removing) {
+    // B5: no pre-write walk gate on write tools (post-write gate applies).
     const { tree, errors } = await walkTree({ projectRoot });
-    if (errors.length > 0) return walkerBlockedResult(errors);
     const verb = removing ? 'unlink' : 'link';
     const us = tree.byId.get(args.usId);
     if (!us || tree.kindById.get(args.usId) !== 'userStory') {
@@ -1035,6 +1040,7 @@ export function createToolRegistry({ projectRoot, log }) {
       patch: { tacIds: next },
       sets: [],
       options: { dryRun },
+      walkErrors: errors,
     });
     if (isRcfError(result)) return writerErrorResult(result, log);
     return okResult({ ok: true, usId: args.usId, tacIds: next, ...(dryRun ? { dryRun: true } : {}) });

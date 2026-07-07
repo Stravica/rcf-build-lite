@@ -344,13 +344,24 @@ test('rcf_link / rcf_unlink: post-state echoed, idempotent no-op, disk round-tri
   assert.equal(badTac.structuredContent.errors[0].kind, 'brokenReference');
 });
 
-test('write tools: walker errors block the mutation with the full issue list (D10 row)', async () => {
+test('write tools: pre-existing walker errors no longer block mutations; net-new breakage still refuses (B5)', async () => {
   const tmp = await scaffold();
   await breakTree(tmp);
   const registry = registryFor(tmp);
+  // B5 amendment to the old D10 write-gate row: a benign mutation on an
+  // already-broken tree proceeds (the post-write state carries no NEW
+  // breakage - repairing a broken tree must be possible in-tool).
   const result = await registry.call('rcf_update', { id: 'US-101', sets: [{ path: 'title', value: 'x' }] });
-  assert.equal(result.isError, true);
-  assert.equal(result.structuredContent.errors[0].kind, 'brokenReference');
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.ok, true);
+  // A mutation that would ADD breakage still refuses: replacing US-101's
+  // AC set leaves FBS-001.acIds dangling on AC-101-1.
+  const bad = await registry.call('rcf_update', {
+    id: 'US-101',
+    patch: { acceptanceCriteria: [{ id: 'AC-101-2', description: 'replaced', testable: true }] },
+  });
+  assert.equal(bad.isError, true);
+  assert.equal(bad.structuredContent.errors[0].rule, 'postWriteValidation');
 });
 
 // ---------------------------------------------------------------------------
