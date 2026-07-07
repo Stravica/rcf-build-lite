@@ -50,7 +50,7 @@ export async function main(argv, deps = {}) {
   const id = positionals[0];
   const projectRoot = await findProjectRoot(cwd);
   if (!projectRoot) {
-    stderr.write('[error] usage no project root found (no rcf/manifest.json in this directory or any ancestor).\n');
+    stderr.write('[error] usage no project root found (no rcf/manifest.json in this directory or any ancestor). Run `npx rcf init` to create and wire a project.\n');
     return 2;
   }
   const { tree } = await walkTree({ projectRoot });

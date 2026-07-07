@@ -42,10 +42,20 @@ test('rcf init without --project-name and no TTY fails with exit 2', async () =>
   assert.match(stderr, /--project-name is required/);
 });
 
-test('rcf init refuses to overwrite an existing project (exit 2)', async () => {
+test('rcf init never overwrites an existing tree; re-run refreshes the wiring (Theme 1)', async () => {
   const tmp = await mkdtemp(join(tmpdir(), 'rcf-init-twice-'));
   await runBinInit(tmp, ['--project-name', 'A', '--non-interactive']);
-  const { code, stderr } = await runBinInit(tmp, ['--project-name', 'B', '--non-interactive']);
+  const { code, stdout } = await runBinInit(tmp, ['--project-name', 'B', '--non-interactive']);
+  assert.equal(code, 0);
+  assert.match(stdout, /already present - left untouched/);
+  const manifest = JSON.parse(await readFile(join(tmp, 'rcf', 'manifest.json'), 'utf8'));
+  assert.equal(manifest.projectName, 'A', 'tree files are never overwritten');
+});
+
+test('rcf init --no-agent-setup on an existing project still refuses (exit 2, nothing to do)', async () => {
+  const tmp = await mkdtemp(join(tmpdir(), 'rcf-init-twice-optout-'));
+  await runBinInit(tmp, ['--project-name', 'A', '--non-interactive']);
+  const { code, stderr } = await runBinInit(tmp, ['--project-name', 'B', '--non-interactive', '--no-agent-setup']);
   assert.equal(code, 2);
   assert.match(stderr, /already exists/);
 });

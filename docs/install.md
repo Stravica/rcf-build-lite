@@ -72,7 +72,25 @@ The helper lasts for the shell session; add it to your shell profile (with the a
 
 ## 7. Wire into an agent harness
 
-`rcf mcp` serves the project over the Model Context Protocol - local stdio, no HTTP. An MCP-capable harness launches it as a subprocess in your project directory. Register it with the absolute path to your clone (pre-publish there is no `rcf` binary on your `PATH`, so the entry invokes `node` directly). For Claude Code, in your project's `.mcp.json`:
+The golden path is one command, run in your project directory BEFORE you start the agent session:
+
+```sh
+rcf init
+```
+
+(Pre-publish, invoke it via the shell helper from [section 6](#6-verify-the-install) or `node <path-to-clone>/bin/rcf.js init`; once the package ships to npm, `npx rcf init` is the same thing.)
+
+`rcf init` is the full pre-session bootstrap. It:
+
+1. Scaffolds the `rcf/` tree (skipped, untouched, if one already exists).
+2. Writes or merges the project-root `.mcp.json` with the `rcf` server entry. The merge preserves other servers and unknown keys; an existing `rcf` entry is left alone.
+3. Writes the method fragment from [`guidance/harness-template.md`](../guidance/harness-template.md) into your project's `CLAUDE.md` (or `AGENTS.md` if that is what exists), inside `<!-- rcf:begin -->` / `<!-- rcf:end -->` markers. Re-running init refreshes the marked block in place - it never duplicates.
+
+Then start your agent session. That order matters: harnesses read `.mcp.json` and the instructions file at session start, so a project wired mid-session needs a session restart to take effect.
+
+`rcf mcp` is the server the `.mcp.json` entry launches: it serves the project over the Model Context Protocol - local stdio, no HTTP - resolving the project root from its working directory at startup (or `--project-root <path>`; `rcf help mcp` covers the flags). A registered server exposes eleven `rcf_*` tools, the tree as resources, and two agent playbook prompts; [how it works, section 6](how-it-works.md#6-the-agent-contract) has the inventory.
+
+**Manual fallback.** If you cannot run the bootstrap (pre-existing session, non-standard harness), `rcf init --no-agent-setup` scaffolds the tree only and prints the manual steps: register the server in `.mcp.json` yourself -
 
 ```json
 {
@@ -85,11 +103,7 @@ The helper lasts for the shell session; add it to your shell profile (with the a
 }
 ```
 
-The server resolves the project root from its working directory at startup - run it from the project whose `rcf/` tree it should serve, or pass `--project-root <path>`. Run `rcf init` in the project first; the server needs an existing tree. `rcf help mcp` covers the flags.
-
-A registered server exposes eleven `rcf_*` tools, the tree as resources, and two agent playbook prompts; [how it works, section 6](how-it-works.md#6-the-agent-contract) has the inventory.
-
-To wire the method (not just the tools) into your agent, paste the fragment from [`guidance/harness-template.md`](../guidance/harness-template.md) into your project's `CLAUDE.md` or `AGENTS.md`.
+- and paste the fragment from [`guidance/harness-template.md`](../guidance/harness-template.md) into your project's `CLAUDE.md` or `AGENTS.md`, then restart the agent session. The server nudges any session it detects as unwired (no rcf marker block in the instructions file) back to `rcf init` + restart.
 
 ## 8. Troubleshooting
 
@@ -100,4 +114,5 @@ To wire the method (not just the tools) into your agent, paste the fragment from
 | `rcf view` page shows no diagrams | Vendored Mermaid bundle missing (`src/view/vendored/mermaid.min.js`) | Run `pnpm run vendor` from the clone root. |
 | `rcf view` exits 2 with `EADDRINUSE` | Port 4373 already bound | Pass `--port <n>` or stop the other process. `rcf help view` lists the precedence rules. |
 | `command not found: rcf` | Pre-publish there is no global binary | Use `pnpm rcf <verb>` inside the clone, the shell helper from [section 6](#6-verify-the-install), or `node <path-to-clone>/bin/rcf.js <verb>`. |
-| MCP client shows zero `rcf_*` tools; the server subprocess is dead | `rcf mcp` found no `rcf/manifest.json` in its working directory or any ancestor. It exits 2 with a `no project root found` line on stderr before any protocol traffic - most MCP clients hide that stderr, so the only visible symptom is an empty tool list. | Run `rcf init` in the project the server should serve, or point the server at an initialised project with `--project-root <path>`. See [section 7](#7-wire-into-an-agent-harness). |
+| MCP client shows zero `rcf_*` tools; the server subprocess is dead | `rcf mcp` found no `rcf/manifest.json` in its working directory or any ancestor. It exits 2 with a `no project root found` line on stderr before any protocol traffic - most MCP clients hide that stderr, so the only visible symptom is an empty tool list. | Run `rcf init` in the project the server should serve (it wires the tree, `.mcp.json` and the agent instructions), then restart the agent session; or point the server at an initialised project with `--project-root <path>`. See [section 7](#7-wire-into-an-agent-harness). |
+| Every tool response ends with a "Setup incomplete" instruction | The server found a tree but no `<!-- rcf:begin -->` block in the project-root `CLAUDE.md` / `AGENTS.md` - the session started without the init bootstrap. | Run `rcf init` in the project, then exit and restart the agent session. The notice disappears once the marker block exists. |

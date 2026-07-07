@@ -208,7 +208,7 @@ export async function main(argv, deps = {}) {
   const cwd = deps.cwd ?? process.cwd();
   const projectRoot = await findProjectRoot(cwd);
   if (!projectRoot) {
-    stderr.write('[error] usage no project root found (no rcf/manifest.json in this directory or any ancestor).\n');
+    stderr.write('[error] usage no project root found (no rcf/manifest.json in this directory or any ancestor). Run `npx rcf init` to create and wire a project.\n');
     stderr.write('Run `rcf init` or create rcf/manifest.json to start.\n');
     return 2;
   }

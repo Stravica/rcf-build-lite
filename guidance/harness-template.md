@@ -2,7 +2,9 @@
 
 ## What this is
 
-One paste-in block that wires an agent into the RCF loop. Paste it into the agent instructions file at your project root: `CLAUDE.md` for Claude Code, `AGENTS.md` for harnesses that read that convention. Nothing else needs configuring; the fragment is complete as shipped and names no specific harness.
+The block that wires an agent into the RCF loop. **The golden path is `rcf init`**: it writes this fragment into your project's agent-instructions file automatically (`CLAUDE.md` for Claude Code, `AGENTS.md` for harnesses that read that convention), inside `<!-- rcf:begin -->` / `<!-- rcf:end -->` markers so re-running init refreshes it in place. Paste it by hand only if you skipped the bootstrap (`rcf init --no-agent-setup`) or your harness reads instructions from somewhere non-standard. The fragment is complete as shipped and names no specific harness.
+
+These are operating rules for the agent, not suggestions. They exist because the failure modes are known: agents fabricate documents single-shot instead of asking, silently drop the tech or test layer, and declare scaffold TODOs "done". The fragment forecloses all three.
 
 ## The fragment
 
@@ -10,24 +12,46 @@ One paste-in block that wires an agent into the RCF loop. Paste it into the agen
 ## RCF
 
 This project uses RCF. The tree under rcf/ is the requirements spine and
-the rcf CLI is the referee. Work is defined by FBS spec bundles, not by
+the rcf CLI / rcf_* MCP tools are the referee. The rules below are hard
+rules, not suggestions. Work is defined by FBS spec bundles, not by
 improvised task lists.
 
+RULE 1 - Elicit first; never fabricate.
+- Before authoring or rewriting any RCF document, run the elicitation
+  playbook: the rcf_elicit_requirements MCP prompt (or
+  guidance/elicitation-playbook.md). Ask the stakeholder its questions
+  and WAIT for answers.
+- Document content comes from stakeholder answers. If a fact was not
+  given to you, do not invent it - ask. A chain written in one shot
+  without stakeholder input is a method violation, not a deliverable.
+
+RULE 2 - The full chain is the deliverable.
+- All layers: PRD -> REQ -> US -> AC -> TS -> TC, plus the tech side
+  (TAD, TAC, ADR). Do not drop a layer silently.
+- Init-scaffold TODO placeholders are NOT a finished state. Every
+  scaffolded doc is either authored with the stakeholder or its removal
+  is explicitly agreed with them.
+- If a layer seems inapplicable, say so and get the stakeholder's
+  agreement before leaving it out.
+
+RULE 3 - The test layer is mandatory.
+- Author TS and TC documents and run rcf coverage --strict. Do not
+  declare the work done while coverage fails, unless the stakeholder has
+  explicitly accepted the gap.
+
 Session start:
-- Run rcf validate. A broken tree is fixed or reported before anything else.
+- Run rcf validate. A broken tree is fixed or reported before anything
+  else.
 - Run rcf build for queue state: what is done, in progress, blocked.
 
 Build loop:
-- Run rcf build --next to get the spec bundle for the next actionable item.
-- Execute the five-stage runbook the bundle prints: Define, Build, Review,
-  Test, Finalise. Every stage ends in a commit.
+- Run rcf build --next to get the spec bundle for the next actionable
+  item, then execute the five-stage runbook it prints: Define, Build,
+  Review, Test, Finalise. Every stage ends in a commit.
 - Record lifecycle transitions with the exact mark commands the bundle
   prints. Never mark backwards.
-
-When to run the referees:
-- rcf validate after any tree edit.
-- rcf coverage --strict before claiming any acceptance-criterion work done.
-- rcf trace <id> or rcf impact <id> before touching anything with dependents.
+- Run rcf validate after any tree edit, and rcf trace <id> or
+  rcf impact <id> before touching anything with dependents.
 
 Write discipline:
 - Prefer the rcf verbs (create, update, delete, link) for tree edits.
@@ -35,25 +59,21 @@ Write discipline:
   proceeding.
 
 Escalation:
-- If the bundle is ambiguous or contradicts the tree, stop and ask; do not
-  interpret.
+- If the bundle is ambiguous or contradicts the tree, stop and ask; do
+  not interpret.
 - Never mark a stage done without its referee output.
 
-MCP-wired harnesses: the same contract holds over the server's rcf_* tools
-and prompts.
-
-Method depth: fetch the rcf_execute_build_cycle prompt (or read
-guidance/build-cycle-playbook.md in the rcf-build-lite repo) for the build
-loop, and the rcf_elicit_requirements prompt (or
-guidance/elicitation-playbook.md) for starting a tree from scratch.
+MCP-wired harnesses: the same contract holds over the server's rcf_*
+tools and prompts. Method depth: the rcf_execute_build_cycle prompt (or
+guidance/build-cycle-playbook.md) for the build loop.
 
 <!-- Optional: state your PR convention here, e.g. "PRs target main". -->
 ```
 
 ## Customisation points
 
-Two, and only two, are intended tuning: the optional PR-convention line at the end of the fragment, and your commit cadence if the driving workflow batches differently. Everything else is the method; editing it means running a different method.
+Two, and only two, are intended tuning: the optional PR-convention line at the end of the fragment, and your commit cadence if the driving workflow batches differently. Everything else is the method; editing it means running a different method. The three RULE blocks in particular are load-bearing - they exist to stop observed failure modes.
 
 ## Check it took
 
-Two checks. Ask the agent to state the loop; the answer should name the five stages and the mark commands. Then watch its first `rcf build --next` cycle: the bundle's runbook should be followed stage by stage, with a commit at each stage end.
+Three checks. Ask the agent to state the loop; the answer should name the five stages and the mark commands. Ask what it does before authoring documents; the answer should name the elicitation playbook and stakeholder questions, not drafting. Then watch its first `rcf build --next` cycle: the bundle's runbook should be followed stage by stage, with a commit at each stage end.
