@@ -1,5 +1,10 @@
 # rcf-build-lite
 
+[![ci](https://github.com/Stravica/rcf-build-lite/actions/workflows/ci.yml/badge.svg)](https://github.com/Stravica/rcf-build-lite/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/%40stravica-ai%2Frcf-build-lite)](https://www.npmjs.com/package/@stravica-ai/rcf-build-lite)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D24-brightgreen)](https://nodejs.org)
+
 RCF Build Lite - CLI, MCP server, live HTML view (`rcf view`) and `rcf build` SDD adapter for the [Requirements Confidence Framework (RCF)](https://stravica.ai/rcf-methodology): an unbroken, machine-checkable chain from product intent to test evidence, kept as JSON files in your own repository. First consumer of [`@stravica-ai/rcf-schemas`](https://github.com/Stravica/rcf-schemas).
 
 ## Start here: hand this to your coding agent
