@@ -7,31 +7,24 @@
 
 The CLI, MCP server, live HTML view (`rcf view`) and `rcf build` SDD adapter for the [Requirements Confidence Framework (RCF)](https://stravica.ai/rcf-methodology): an unbroken, machine-checkable chain from product intent to test evidence, kept as JSON files in your own repository. First consumer of [`@stravica-ai/rcf-schemas`](https://github.com/Stravica/rcf-schemas).
 
-## Start here: hand this to your coding agent
+## Start here
 
-You do very little; your agent does the rest. Copy this prompt, fill in the first line, and give it to your coding agent:
+Three steps before you start your coding agent, then one prompt inside the session.
+
+1. Install the CLI: `npm install -g @stravica-ai/rcf-build-lite`.
+2. In your project directory, run `rcf init` (or `npx @stravica-ai/rcf-build-lite init` without the install). One command sets everything up: the requirements files, the MCP server entry and your agent's instructions.
+3. Start your coding agent session in that directory - or restart the one you have open, so it picks up the new configuration.
+
+Then copy this prompt, fill in the first line, and hand it over:
 
 ```text
 I want to build [describe your product idea in a sentence or two].
 
-Before writing any code, set up RCF Build Lite so this project runs
-against a real requirements spine:
-
-1. Install RCF Build Lite: npm install -g @stravica-ai/rcf-build-lite
-   (or run it through npx). The repo is
-   https://github.com/Stravica/rcf-build-lite.
-2. Read docs/getting-started.md and docs/how-it-works.md from that repo.
-3. Initialise an RCF tree in my project with rcf init. It scaffolds
-   the tree and wires the MCP server plus this project's CLAUDE.md or
-   AGENTS.md agent instructions for you - restart this session
-   straight after, so the harness picks up the new configuration
-   before you continue.
-4. Interview me about what I want to build. Capture it as a PRD,
-   requirements, user stories and acceptance criteria, following the
-   rcf_elicit_requirements playbook (guidance/elicitation-playbook.md),
-   and show me the result with rcf view.
-5. When the tree validates clean, start the build loop: rcf build --next,
-   then execute the spec bundle it prints, stage by stage.
+Before writing any code, interview me about what I want. Capture it
+as clear, testable requirements, keep them linked to the code and
+tests as we build, and use the tools already set up in this project
+to guide the process. Show me what you have captured for my review,
+then work through the build step by step.
 ```
 
 If you'd rather drive it by hand, [docs/getting-started.md](docs/getting-started.md) covers the same ground at human pace.
