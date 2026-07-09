@@ -26,6 +26,11 @@ const DEFAULT_DEBOUNCE_MS = 50;
  * @param {AbortSignal} [args.signal] - external cancellation
  * @param {(err: Error) => void} [args.onError] - fired on watcher failure
  * @param {(path: string) => boolean} [args.filter] - override default `*.json` filter
+ * @param {{ setTimeout?: typeof setTimeout, clearTimeout?: typeof clearTimeout }} [args.timers]
+ *   - injectable timer functions for the debounce flush. Defaults to the
+ *   globals. Exists as a determinism seam for tests: a manual timer lets a
+ *   test decide exactly when the debounce window closes instead of racing
+ *   real fs-event delivery latency. Production callers never pass this.
  * @returns {{ close: () => void }}
  */
 export function watch({
@@ -35,6 +40,7 @@ export function watch({
   signal,
   onError,
   filter,
+  timers,
 } = {}) {
   if (!Array.isArray(paths) || paths.length === 0) {
     throw new TypeError('watch: paths must be a non-empty array of absolute paths');
@@ -43,6 +49,7 @@ export function watch({
     throw new TypeError('watch: onChange must be a function');
   }
   const accept = typeof filter === 'function' ? filter : defaultFilter;
+  const timerHost = { setTimeout, clearTimeout, ...timers };
   const watchers = [];
   const pending = new Map();
   let timer = null;
@@ -71,9 +78,9 @@ export function watch({
   function schedule(path, type) {
     if (closed) return;
     pending.set(path, type);
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(flush, debounceMs);
-    if (typeof timer.unref === 'function') timer.unref();
+    if (timer) timerHost.clearTimeout(timer);
+    timer = timerHost.setTimeout(flush, debounceMs);
+    if (timer && typeof timer.unref === 'function') timer.unref();
   }
 
   async function classify(fullPath, eventType) {
@@ -119,7 +126,7 @@ export function watch({
     if (closed) return;
     closed = true;
     if (timer) {
-      clearTimeout(timer);
+      timerHost.clearTimeout(timer);
       timer = null;
     }
     pending.clear();

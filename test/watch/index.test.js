@@ -37,18 +37,53 @@ test('watch fires on a .json change under a temp dir', async () => {
 });
 
 test('watch coalesces bursts of writes to the same file into one event', async () => {
+  // Deterministic via the `timers` seam. With a real debounce timer this
+  // test raced fs-event delivery: on a loaded runner (observed in CI) the
+  // OS can spread a burst's notifications beyond any fixed debounce
+  // window, splitting the batch into two flushes. A manual timer means
+  // the debounce window closes only when the test says so - however the
+  // OS spreads or merges delivery, the pending map still coalesces by
+  // path and exactly one flush fires.
   const dir = await mkdtemp(join(tmpdir(), 'rcf-watch-coalesce-'));
   const events = [];
+  let flushNow = null;
+  let scheduleCount = 0;
   const w = watch({
     paths: [dir],
     onChange: (ev) => events.push(ev),
     debounceMs: DEBOUNCE_MS,
+    timers: {
+      setTimeout: (fn) => {
+        scheduleCount += 1;
+        flushNow = fn;
+        return { unref() {} };
+      },
+      clearTimeout: () => {},
+    },
   });
   const p = join(dir, 'a.json');
   await writeFile(p, '{"a":1}', 'utf8');
   await writeFile(p, '{"a":2}', 'utf8');
   await writeFile(p, '{"a":3}', 'utf8');
-  await collect(() => {});
+  // Event-driven wait: poll until watcher events have arrived and gone
+  // quiet (no new debounce schedules for QUIET_MS), under a generous
+  // ceiling. No flush can fire during this wait - the timer is manual.
+  const QUIET_MS = 300;
+  const CEILING_MS = 10_000;
+  const POLL_MS = 20;
+  const started = Date.now();
+  let lastCount = 0;
+  let quietSince = Date.now();
+  while (Date.now() - started < CEILING_MS) {
+    if (scheduleCount !== lastCount) {
+      lastCount = scheduleCount;
+      quietSince = Date.now();
+    }
+    if (scheduleCount > 0 && Date.now() - quietSince >= QUIET_MS) break;
+    await new Promise((r) => setTimeout(r, POLL_MS));
+  }
+  assert.ok(scheduleCount >= 1, 'watcher delivered no events within the ceiling');
+  flushNow();
   w.close();
   const forA = events.filter((e) => e.path === p);
   assert.equal(forA.length, 1, `expected exactly one event for a.json, got ${forA.length}`);
