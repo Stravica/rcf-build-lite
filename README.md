@@ -21,9 +21,11 @@ against a real requirements spine:
    (or run it through npx). The repo is
    https://github.com/Stravica/rcf-build-lite.
 2. Read docs/getting-started.md and docs/how-it-works.md from that repo.
-3. Initialise an RCF tree in my project with rcf init, and paste the
-   fragment from guidance/harness-template.md into this project's
-   CLAUDE.md or AGENTS.md.
+3. Initialise an RCF tree in my project with rcf init. It scaffolds
+   the tree and wires the MCP server plus this project's CLAUDE.md or
+   AGENTS.md agent instructions for you - restart this session
+   straight after, so the harness picks up the new configuration
+   before you continue.
 4. Interview me about what I want to build. Capture it as a PRD,
    requirements, user stories and acceptance criteria, following the
    rcf_elicit_requirements playbook (guidance/elicitation-playbook.md),
