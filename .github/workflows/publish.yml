@@ -22,4 +22,10 @@ jobs:
       - run: pnpm test
       # npm performs the publish step: trusted publishing (OIDC) requires npm >= 11.5.1
       # (bundled with current Node 24 releases); pnpm 9 predates OIDC support in pnpm.
+      # First publish authenticates with a short-lived granular token (npm cannot bind
+      # a trusted publisher to a never-published package). Once 0.1.0 is live the
+      # trusted publisher is bound on npmjs.com, the token is deleted, and this env
+      # line is removed - provenance signing uses the workflow OIDC token either way.
       - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
