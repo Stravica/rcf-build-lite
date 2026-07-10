@@ -73,9 +73,9 @@ rcf delete CN-001 --cascade  # drops the dependency edge from dependents first
 
 ### `--derive-deps`: an optional dev-time assist
 
-Hand-declaring `dependencies[]` is accurate at symbol level but under-recalls at file level (evidence: a controlled comparison against static analysis found hand-declaration missed real edges roughly a quarter of the time). `rcf create cn` / `rcf update cn --derive-deps` shells out to [`dependency-cruiser`](https://github.com/sverweij/dependency-cruiser) - **when it is resolvable** (a local install, or `npx --no-install`) - to auto-derive file-level edges and merge them into `dependencies[]` against existing Code Nodes over those files.
+Hand-declaring `dependencies[]` is accurate at symbol level but under-recalls at file level - hand-declared edges routinely miss real ones that static analysis catches. `rcf create cn` / `rcf update cn --derive-deps` shells out to [`dependency-cruiser`](https://github.com/sverweij/dependency-cruiser) - **when it is resolvable** (a local install, or `npx --no-install`) - to auto-derive file-level edges and merge them into `dependencies[]` against existing Code Nodes over those files.
 
-`dependency-cruiser` is **never a runtime dependency of `rcf`** (the zero-third-party-runtime-deps claim holds): the flag is purely a dev-time convenience. When the tool cannot be resolved, `--derive-deps` fails with a helpful message rather than silently degrading or reaching for the network to install anything:
+`dependency-cruiser` is **never a runtime dependency of `rcf`**: the flag is purely a dev-time convenience. When the tool cannot be resolved, `--derive-deps` fails with a helpful message rather than silently degrading or reaching for the network to install anything:
 
 ```sh
 rcf create cn --path src/a.js --derive-deps
@@ -124,13 +124,13 @@ The gate is deterministic edge counting against the working tree (`tree.cnByAcId
 
 ## 9. Honest limits
 
-Every claim below is demonstrated in the phase's proof-of-concept, not asserted:
+Every claim below is demonstrated against this repository's own Code Node tree, not asserted:
 
 - **Semantic drift is invisible.** A symbol's declaration surviving intact proves the *name* still exists - not that the code still does what the acceptance criterion says. Gut a function's caching guard while keeping its name and `rcf validate` reports the tree clean. Closing this would mean executing or semantically analysing the body: an LLM or harness layer sitting above `rcf`, deliberately out of scope for a tool that promises zero semantic judgement.
 - **Symbol-level Code Nodes rot on rename or move.** This is a real, ongoing maintenance surface - bought off by cheap detection and a one-field repair, not eliminated. If repair friction becomes annoying in practice, the guidance is to drop to file-level for that node and keep symbol-level only for the genuinely load-bearing ones.
 - **The anchor scan can false-clean on a name collision.** If a symbol moves to another file while a same-file namesake declaration (same name, unrelated purpose) survives in the original location, the deterministic regex scan reports the symbol present. It has no lexical scope awareness. Rare in practice, but real.
 - **File-level Code Nodes are blind to intra-file change.** A symbol renamed, moved, or deleted inside a file that still exists goes undetected by a file-level CN pointed at that file. The precision/rot trade is a per-node authoring choice, not a free lunch.
 - **Dependency edges are only as good as their source.** Hand-declared symbol-level edges are error-prone; `--derive-deps` is file-granular only.
-- **No symbol-level dependency auto-derivation, no S5/S6-style mechanical CN generators, no rename-tracking assist** ship in this phase. All are real, understood extensions - deliberately deferred, not forgotten.
+- **No symbol-level dependency auto-derivation, no mechanical CN generators (test-coverage-derived, diff-derived), no rename-tracking assist** ship yet. All are real, understood extensions - deliberately deferred, not forgotten.
 
 None of these limits break the core claim: a *competent* refactor - one that renames or moves code and fixes every caller so the code loads and the test suite passes - is precisely the case where a Code Node's dangling pointer is the last remaining evidence of drift, and that case `rcf validate` catches every time.
