@@ -35,12 +35,19 @@ async function fileExists(path) {
 
 const INIT_ARGS = ['--project-name', 'BootstrapTest', '--non-interactive'];
 
-test('fresh dir: init creates all three artefacts (tree + .mcp.json + CLAUDE.md)', async () => {
+test('fresh dir: init creates the tree, .mcp.json and BOTH CLAUDE.md + AGENTS.md', async () => {
   const tmp = await mkdtemp(join(tmpdir(), 'rcf-boot-fresh-'));
   const { code, stdout } = await runBinInit(tmp, INIT_ARGS);
   assert.equal(code, 0);
-  assert.match(stdout, /Scaffolded 9 files under rcf\//);
-  assert.match(stdout, /Project wired: rcf\/ tree \+ MCP config \+ agent instructions/);
+  // High-level completion output, not a developer file list.
+  assert.match(stdout, /RCF project created\./);
+  assert.match(stdout, /Document chain\s+scaffolded under rcf\//);
+  assert.match(stdout, /MCP server\s+registered in \.mcp\.json/);
+  assert.match(stdout, /Agent instructions\s+written to CLAUDE\.md and AGENTS\.md/);
+  assert.match(stdout, /Next: start your agent session/);
+  // The old developer file manifest is gone.
+  assert.doesNotMatch(stdout, /Scaffolded \d+ files/);
+  assert.doesNotMatch(stdout, /^ {2}rcf\/manifest\.json/m);
   // Tree.
   assert.equal(await fileExists(join(tmp, 'rcf/manifest.json')), true);
   // MCP config: exact registration shape install.md documents.
@@ -49,13 +56,16 @@ test('fresh dir: init creates all three artefacts (tree + .mcp.json + CLAUDE.md)
   assert.equal(mcp.mcpServers.rcf.args.length, 2);
   assert.match(mcp.mcpServers.rcf.args[0], /bin\/rcf\.js$/);
   assert.equal(mcp.mcpServers.rcf.args[1], 'mcp');
-  // Agent instructions inside markers, carrying the three firm rules.
-  const claude = await readFile(join(tmp, 'CLAUDE.md'), 'utf8');
-  assert.match(claude, /<!-- rcf:begin -->/);
-  assert.match(claude, /<!-- rcf:end -->/);
-  assert.match(claude, /RULE 1 - Elicit first/);
-  assert.match(claude, /RULE 2 - The full chain/);
-  assert.match(claude, /RULE 3 - The test layer/);
+  // Agent instructions written to BOTH files (vendor-neutral default),
+  // each inside markers and carrying the three firm rules.
+  for (const name of ['CLAUDE.md', 'AGENTS.md']) {
+    const doc = await readFile(join(tmp, name), 'utf8');
+    assert.match(doc, /<!-- rcf:begin -->/, `${name} has begin marker`);
+    assert.match(doc, /<!-- rcf:end -->/, `${name} has end marker`);
+    assert.match(doc, /RULE 1 - Elicit first/, `${name} has rule 1`);
+    assert.match(doc, /RULE 2 - The full chain/, `${name} has rule 2`);
+    assert.match(doc, /RULE 3 - The test layer/, `${name} has rule 3`);
+  }
 });
 
 test('existing .mcp.json with another server: merged, other server and unknown keys intact', async () => {
@@ -79,7 +89,7 @@ test('existing rcf entry in .mcp.json is left alone', async () => {
   await writeFile(join(tmp, '.mcp.json'), JSON.stringify(existing, null, 2), 'utf8');
   const { code, stdout } = await runBinInit(tmp, INIT_ARGS);
   assert.equal(code, 0);
-  assert.match(stdout, /already present \(kept\)/);
+  assert.match(stdout, /already registered in \.mcp\.json \(kept\)/);
   const mcp = JSON.parse(await readFile(join(tmp, '.mcp.json'), 'utf8'));
   assert.deepEqual(mcp.mcpServers.rcf.args, ['/custom/path/rcf.js', 'mcp']);
 });
@@ -93,23 +103,27 @@ test('unparseable .mcp.json is refused, never clobbered', async () => {
   assert.equal(await readFile(join(tmp, '.mcp.json'), 'utf8'), '{not json');
 });
 
-test('existing CLAUDE.md: fragment appended inside markers, prior content intact', async () => {
+test('existing CLAUDE.md: fragment appended inside markers, prior content intact, no AGENTS.md invented', async () => {
   const tmp = await mkdtemp(join(tmpdir(), 'rcf-boot-claude-'));
   const prior = '# My project\n\nPre-existing instructions the user wrote.\n';
   await writeFile(join(tmp, 'CLAUDE.md'), prior, 'utf8');
-  const { code } = await runBinInit(tmp, INIT_ARGS);
+  const { code, stdout } = await runBinInit(tmp, INIT_ARGS);
   assert.equal(code, 0);
+  assert.match(stdout, /Agent instructions\s+updated in CLAUDE\.md/);
   const claude = await readFile(join(tmp, 'CLAUDE.md'), 'utf8');
   assert.equal(claude.startsWith(prior), true, 'prior content intact at the top');
   assert.match(claude, /<!-- rcf:begin -->/);
+  // An existing instructions file is the routing target; the other
+  // convention's file is NOT invented (only fresh repos get both).
+  assert.equal(await fileExists(join(tmp, 'AGENTS.md')), false, 'no AGENTS.md invented');
 });
 
-test('existing AGENTS.md and no CLAUDE.md: fragment lands in AGENTS.md', async () => {
+test('existing AGENTS.md and no CLAUDE.md: fragment lands in AGENTS.md, no CLAUDE.md invented', async () => {
   const tmp = await mkdtemp(join(tmpdir(), 'rcf-boot-agents-'));
   await writeFile(join(tmp, 'AGENTS.md'), '# Agents\n', 'utf8');
   const { code, stdout } = await runBinInit(tmp, INIT_ARGS);
   assert.equal(code, 0);
-  assert.match(stdout, /AGENTS\.md: rcf agent-instructions block/);
+  assert.match(stdout, /Agent instructions\s+updated in AGENTS\.md/);
   const agents = await readFile(join(tmp, 'AGENTS.md'), 'utf8');
   assert.match(agents, /<!-- rcf:begin -->/);
   assert.equal(await fileExists(join(tmp, 'CLAUDE.md')), false, 'no CLAUDE.md invented');
@@ -120,19 +134,23 @@ test('re-run idempotency: tree untouched, marked block replaced not duplicated',
   await runBinInit(tmp, ['--project-name', 'First', '--non-interactive']);
   const { code, stdout } = await runBinInit(tmp, ['--project-name', 'Second', '--non-interactive']);
   assert.equal(code, 0);
-  assert.match(stdout, /already present - left untouched/);
+  assert.match(stdout, /already set up here - document chain left untouched/);
   const manifest = JSON.parse(await readFile(join(tmp, 'rcf/manifest.json'), 'utf8'));
   assert.equal(manifest.projectName, 'First', 'tree files never overwritten');
-  const claude = await readFile(join(tmp, 'CLAUDE.md'), 'utf8');
-  assert.equal(claude.match(/<!-- rcf:begin -->/g).length, 1, 'exactly one begin marker');
-  assert.equal(claude.match(/<!-- rcf:end -->/g).length, 1, 'exactly one end marker');
+  // Both files were written on the fresh run; re-run must not duplicate
+  // the marked block in either.
+  for (const name of ['CLAUDE.md', 'AGENTS.md']) {
+    const doc = await readFile(join(tmp, name), 'utf8');
+    assert.equal(doc.match(/<!-- rcf:begin -->/g).length, 1, `${name}: exactly one begin marker`);
+    assert.equal(doc.match(/<!-- rcf:end -->/g).length, 1, `${name}: exactly one end marker`);
+  }
 });
 
 test('--no-agent-setup: tree only, manual instructions printed, no wiring files', async () => {
   const tmp = await mkdtemp(join(tmpdir(), 'rcf-boot-optout-'));
   const { code, stdout } = await runBinInit(tmp, [...INIT_ARGS, '--no-agent-setup']);
   assert.equal(code, 0);
-  assert.match(stdout, /Scaffolded 9 files under rcf\//);
+  assert.match(stdout, /Set up the RCF document chain under rcf\//);
   assert.match(stdout, /Agent setup skipped/);
   assert.match(stdout, /mcpServers/);
   assert.match(stdout, /harness-template\.md/);

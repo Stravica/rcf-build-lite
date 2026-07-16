@@ -25,7 +25,10 @@ Write documents as you go with `rcf create` and `rcf update`; do not batch the t
 
 ```
 $ rcf init --project-name "Field notes" --non-interactive
-Scaffolded 9 files under rcf/.
+RCF project created.
+  Document chain     scaffolded under rcf/ - PRD, requirement, story, acceptance criterion, architecture and build-sequence placeholders for your agent to fill in.
+  MCP server         registered in .mcp.json.
+  Agent instructions written to CLAUDE.md and AGENTS.md.
 ```
 
 The scaffold gives you valid placeholder roots (PRD, TAD, BS) plus one placeholder REQ / US / TAC / ADR / FBS chain; you replace placeholder content as the conversation fills it in.
