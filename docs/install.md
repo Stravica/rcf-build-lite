@@ -78,7 +78,7 @@ rcf init
 
 1. Scaffolds the `rcf/` tree (skipped, untouched, if one already exists).
 2. Writes or merges the project-root `.mcp.json` with the `rcf` server entry. The merge preserves other servers and unknown keys; an existing `rcf` entry is left alone.
-3. Writes the method fragment from [`guidance/harness-template.md`](../guidance/harness-template.md) into your project's `CLAUDE.md` (or `AGENTS.md` if that is what exists), inside `<!-- rcf:begin -->` / `<!-- rcf:end -->` markers. Re-running init refreshes the marked block in place; it never duplicates.
+3. Writes the method fragment from [`guidance/harness-template.md`](../guidance/harness-template.md) into your project's agent-instructions file(s), inside `<!-- rcf:begin -->` / `<!-- rcf:end -->` markers. On a fresh project it writes **both** `CLAUDE.md` and `AGENTS.md`, so the wiring is vendor-neutral by default; if you already have one of them, it refreshes that file in place and does not invent the other. Re-running init refreshes the marked block; it never duplicates.
 
 Then start your agent session. That order matters: harnesses read `.mcp.json` and the instructions file at session start, so a project wired mid-session needs a session restart to take effect.
 

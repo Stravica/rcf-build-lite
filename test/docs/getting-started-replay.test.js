@@ -81,10 +81,11 @@ const SEQUENCE = {
   s7MarkBackward: ['build', 'FBS-001', '--mark', 'inProgress'],
 };
 
-test('s2: rcf init scaffolds 9 files (exit 0)', async () => {
+test('s2: rcf init scaffolds the project (exit 0)', async () => {
   const { code, stdout } = await rcf(SEQUENCE.s2Init);
   assert.equal(code, 0);
-  assert.match(stdout, /Scaffolded 9 files under rcf\//);
+  assert.match(stdout, /RCF project created\./);
+  assert.match(stdout, /Document chain\s+scaffolded under rcf\//);
 });
 
 test('s4: the authoring sequence succeeds end to end (exit 0 each)', async () => {

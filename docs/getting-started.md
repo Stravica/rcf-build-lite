@@ -18,24 +18,17 @@ rcf init --non-interactive --project-name "Recipe Box"
 ```
 
 ```
-Scaffolded 9 files under rcf/.
-  rcf/manifest.json
-  rcf/prd.json
-  rcf/requirements/req-001.json
-  rcf/user-stories/us-101.json
-  rcf/tad.json
-  rcf/tacs/tac-001.json
-  rcf/adrs/adr-001.json
-  rcf/build-sequence.json
-  rcf/fbs/fbs-001.json
-.mcp.json: rcf server entry created
-CLAUDE.md: rcf agent-instructions block created
-Project wired: rcf/ tree + MCP config + agent instructions. Start your agent session.
+RCF project created.
+  Document chain     scaffolded under rcf/ - PRD, requirement, story, acceptance criterion, architecture and build-sequence placeholders for your agent to fill in.
+  MCP server         registered in .mcp.json.
+  Agent instructions written to CLAUDE.md and AGENTS.md.
+
+Next: start your agent session in this directory and tell it what you want to build. It elicits the requirements and drives the build from there - you do not fill in the document chain by hand.
 ```
 
-Run it as plain `rcf init` on a terminal and it prompts for the project name instead.
+Run it as plain `rcf init` on a terminal and it prompts for the project name - and nothing else. Init is a bootstrap, not an elicitation session: it never asks you to name a first requirement or story up front. That is the agent's job once the session starts.
 
-The last three lines are the agent wiring: init registers the MCP server in the project-root `.mcp.json` and writes the method fragment into `CLAUDE.md`, so an agent session started in this directory is fully wired from its first turn ([install, section 7](install.md#7-wire-into-an-agent-harness)). Working through this guide by hand, you can ignore both files - or pass `--no-agent-setup` to skip them.
+The last two summary lines are the agent wiring: init registers the MCP server in the project-root `.mcp.json` and writes the method fragment into both `CLAUDE.md` and `AGENTS.md` (vendor-neutral by default), so an agent session started in this directory is fully wired from its first turn ([install, section 7](install.md#7-wire-into-an-agent-harness)). Working through this guide by hand, you can ignore those files - or pass `--no-agent-setup` to skip them.
 
 What you got, in five lines: `manifest.json` declares the tree's three roots. `prd.json` (the product), `tad.json` (the architecture) and `build-sequence.json` (the build queue) are those roots. Every other document hangs off them: a requirement, a user story with one acceptance criterion, an architecture component (TAC), an architecture decision record (ADR) and one build item (FBS). Each carries `TODO` placeholder text that you replace next. The on-disk layout is specified in the [rcf-schemas file-layout doc](https://github.com/Stravica/rcf-schemas/blob/main/docs/file-layout.md).
 

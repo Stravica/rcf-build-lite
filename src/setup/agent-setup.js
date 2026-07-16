@@ -120,26 +120,17 @@ export async function writeMcpConfig({ projectRoot, binPath = rcfBinPath() }) {
 }
 
 /**
- * Write the guidance fragment into the project's agent-instructions
- * file inside the rcf marker block. Target: existing CLAUDE.md, else
- * existing AGENTS.md, else a new CLAUDE.md. Idempotent: an existing
- * marker block is replaced in place, never duplicated.
+ * Write the fragment into one agent-instructions file inside the rcf
+ * marker block. Idempotent: an existing marker block is replaced in
+ * place, never duplicated; a file without one gets the block appended;
+ * a missing file is created.
  *
- * @param {object} args
- * @param {string} args.projectRoot
- * @param {string} args.fragment
+ * @param {string} target - absolute path
+ * @param {string} file - display name (CLAUDE.md / AGENTS.md)
+ * @param {string} block - the marked fragment block
  * @returns {Promise<{ file: string, action: 'created'|'appended'|'replaced' }>}
  */
-export async function writeAgentInstructions({ projectRoot, fragment }) {
-  const claudePath = join(projectRoot, 'CLAUDE.md');
-  const agentsPath = join(projectRoot, 'AGENTS.md');
-  let target = claudePath;
-  let file = 'CLAUDE.md';
-  if (!(await fileExists(claudePath)) && (await fileExists(agentsPath))) {
-    target = agentsPath;
-    file = 'AGENTS.md';
-  }
-  const block = `${MARKER_BEGIN}\n${fragment}\n${MARKER_END}`;
+async function writeFragmentToFile(target, file, block) {
   const existing = await readIfExists(target);
   if (existing === null) {
     await writeFile(target, `${block}\n`, 'utf8');
@@ -153,6 +144,45 @@ export async function writeAgentInstructions({ projectRoot, fragment }) {
   const sep = existing.endsWith('\n') ? '\n' : '\n\n';
   await writeFile(target, `${existing}${sep}${block}\n`, 'utf8');
   return { file, action: 'appended' };
+}
+
+/**
+ * Write the guidance fragment into the project's agent-instructions
+ * file(s) inside the rcf marker block. Routing:
+ * - An existing instructions file is refreshed in place (CLAUDE.md
+ *   preferred as the write target, else an existing AGENTS.md). We
+ *   never invent the other convention's file when one already exists.
+ * - A fresh repo (neither present) gets BOTH CLAUDE.md and AGENTS.md,
+ *   so the wiring is vendor-neutral by default (operator ruling
+ *   2026-07-16). The same marked fragment goes into each.
+ * Idempotent throughout: re-running replaces the marked block in place,
+ * never duplicating it, in whichever file(s) are touched.
+ *
+ * @param {object} args
+ * @param {string} args.projectRoot
+ * @param {string} args.fragment
+ * @returns {Promise<{ writes: Array<{ file: string, action: 'created'|'appended'|'replaced' }> }>}
+ */
+export async function writeAgentInstructions({ projectRoot, fragment }) {
+  const claudePath = join(projectRoot, 'CLAUDE.md');
+  const agentsPath = join(projectRoot, 'AGENTS.md');
+  const claudeExists = await fileExists(claudePath);
+  const agentsExists = await fileExists(agentsPath);
+  const block = `${MARKER_BEGIN}\n${fragment}\n${MARKER_END}`;
+  const writes = [];
+
+  if (claudeExists) {
+    // Existing CLAUDE.md wins as the target; refresh it in place.
+    writes.push(await writeFragmentToFile(claudePath, 'CLAUDE.md', block));
+  } else if (agentsExists) {
+    // No CLAUDE.md, but an AGENTS.md is present: keep that routing.
+    writes.push(await writeFragmentToFile(agentsPath, 'AGENTS.md', block));
+  } else {
+    // Fresh repo: write both, vendor-neutral by default.
+    writes.push(await writeFragmentToFile(claudePath, 'CLAUDE.md', block));
+    writes.push(await writeFragmentToFile(agentsPath, 'AGENTS.md', block));
+  }
+  return { writes };
 }
 
 /**
