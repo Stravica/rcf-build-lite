@@ -43,7 +43,7 @@ test('BUG-001: rcf --version via a symlinked bin path prints "rcf <semver>"', as
     // Pre-fix: stdout was empty. Post-fix: prints the version line.
     assert.match(
       stdout,
-      /^rcf \d+\.\d+\.\d+\n?$/,
+      /^rcf \d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\n?$/,
       `expected "rcf <semver>" via symlinked path, got: ${JSON.stringify(stdout)}`,
     );
   } finally {
