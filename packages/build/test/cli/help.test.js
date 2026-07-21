@@ -37,7 +37,7 @@ test('rcf with no args prints top-level help (exit 0)', async () => {
 test('rcf --version prints "rcf <semver>"', async () => {
   const { code, stdout } = await runBin(['--version']);
   assert.equal(code, 0);
-  assert.match(stdout, /^rcf \d+\.\d+\.\d+\n?$/);
+  assert.match(stdout, /^rcf \d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\n?$/);
 });
 
 test('rcf --help prints the top-level help', async () => {
