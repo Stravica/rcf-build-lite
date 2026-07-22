@@ -9,7 +9,7 @@ The ship gate for AI-built software.
 
 Point `rcf-verify` at your running app and the acceptance criteria in your repo's [RCF chain](https://stravica.ai/rcf-methodology), and it launches a fresh, isolated AI agent that behaves like a hostile user: walking real journeys against the live app, trying to prove it *doesn't* meet its contract. You get a structured report and a verdict you can gate a release on.
 
-The verifier never sees your source code, your tests, or your builder's claims about what works. It gets the acceptance contract and a URL, nothing else. That separation is the point — an agent can't fairly adversarially test its own build, so this one had no part in building it.
+The verifier never sees your source code, your tests, or your builder's claims about what works. It gets the acceptance contract and a URL, nothing else. That blindness is deliberate: an agent cannot mark its own homework, so the agent that judges the app is never the agent that built it.
 
 > **Honest limit.** Verify does not make an app "fully verified" or "safe". It replaces a self-reported ship-readiness verdict with an independent one — it mitigates the builder's blind spot, it does not eliminate it.
 
@@ -27,7 +27,7 @@ Installing alongside [`@stravica-ai/rcf-build-lite`](https://www.npmjs.com/packa
 rcf-verify run --repo . --profile deployed --url https://your-app.example.com --out report.json
 ```
 
-That runs the adversarial pass and writes `report.json`: findings with severities, and a verdict stamped with the runtime it ran against. Re-render any saved report with `rcf-verify report report.json`.
+That runs the adversarial pass and writes `report.json`: findings with severities, and a verdict stamped with the runtime it was earned against. Re-render any saved report with `rcf-verify report report.json`.
 
 A `deployed` run is the ship verdict. You can also point it at CI or local builds (`--profile ci` / `--profile local-dev`) for correctness passes — same engine, honestly labelled with lower authority, so a localhost pass can never masquerade as ship-ready.
 
