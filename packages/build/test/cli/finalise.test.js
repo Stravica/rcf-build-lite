@@ -40,17 +40,19 @@ writeFileSync(process.env.STUB_MARKER, JSON.stringify({
   autoMemoryDisabled: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY,
   trafficDisabled: process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
 }), 'utf8');
-writeFileSync(outPath, JSON.stringify({
-  schemaVersion: '1',
-  verdict: process.env.STUB_VERDICT ?? 'PASS',
-  verdictAuthority: process.env.STUB_AUTHORITY ?? 'ship',
-  run: {
-    profile: process.env.STUB_PROFILE ?? 'deployed',
-    url: 'https://app.example.com',
-    parityEnv: process.env.STUB_PARITY === '1',
-  },
-  findings: JSON.parse(process.env.STUB_FINDINGS ?? '[]'),
-}), 'utf8');
+if (!process.env.STUB_SKIP_REPORT) {
+  writeFileSync(outPath, JSON.stringify({
+    schemaVersion: '1',
+    verdict: process.env.STUB_VERDICT ?? 'PASS',
+    verdictAuthority: process.env.STUB_AUTHORITY ?? 'ship',
+    run: {
+      profile: process.env.STUB_PROFILE ?? 'deployed',
+      url: 'https://app.example.com',
+      parityEnv: process.env.STUB_PARITY === '1',
+    },
+    findings: JSON.parse(process.env.STUB_FINDINGS ?? '[]'),
+  }), 'utf8');
+}
 process.exit(Number(process.env.STUB_EXIT ?? '0'));
 `;
 
@@ -136,6 +138,28 @@ test('finalise: gate PASS but correctness-only authority HOLDS (exit 4), does NO
   assert.equal(await readStatus(tmp), 'complete', 'the FBS is NOT promoted without ship authority');
   assert.match(deps.stderr.data, /HOLD/);
   assert.match(deps.stderr.data, /ship authority|carries 'correctness' authority/);
+  assert.doesNotMatch(deps.stderr.data, /\[error\]/, 'a HOLD is a clean hold, not an error');
+});
+
+test('finalise: gate PASS (exit 0) but an unreadable/missing report HOLDS (exit 4), state unchanged', async () => {
+  // NIT-3 (w-2026-07-22-004): exit 0 is necessary but not sufficient to write
+  // `verified`. When the subprocess passes but the verify report cannot be read,
+  // the authority is undetermined - which is treated as a HOLD, never a silent
+  // promotion ("unreadable is not a pass"). The FBS stays at `complete`, and the
+  // hold note flags that the report could not be read.
+  const tmp = await scaffoldComplete();
+  const stubPath = await writeStub(tmp);
+  const marker = join(tmp, 'marker.json');
+  const deps = stubDeps(tmp, stubPath, marker, {
+    STUB_EXIT: '0', STUB_SKIP_REPORT: '1',
+  });
+
+  const code = await finalise(['FBS-001', '--url', 'https://app.example.com', '--profile', 'deployed'], deps);
+
+  assert.equal(code, 4, 'a pass with an unreadable report holds (exit 4)');
+  assert.equal(await readStatus(tmp), 'complete', 'the FBS is NOT promoted when the report is unreadable');
+  assert.match(deps.stderr.data, /HOLD/);
+  assert.match(deps.stderr.data, /could not be read/);
   assert.doesNotMatch(deps.stderr.data, /\[error\]/, 'a HOLD is a clean hold, not an error');
 });
 
