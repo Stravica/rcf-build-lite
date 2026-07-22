@@ -17,7 +17,10 @@
     "node": ">=24.0.0"
   },
   "files": [
-    "src"
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "exports": {
     "./store": "./src/store/index.js",

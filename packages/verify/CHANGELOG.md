@@ -1,0 +1,19 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, breaking changes are signalled by a minor version bump.
+
+## [0.1.0] - 2026-07-22
+
+First publish. `rcf-verify-lite` v1 — a fresh-context adversarial verifier for the RCF Lite suite.
+
+### Added
+
+- **`rcf-verify` CLI and the v1 verifier engine** ([#48](https://github.com/Stravica/rcf-lite/pull/48)): given an RCF chain (the acceptance contract) and a running instance under a declared runtime profile, it launches an isolated verifier agent that walks real user journeys adversarially — trying to *disprove* the app against its acceptance criteria — and emits a structured verdict stamped with the runtime it ran against. The verifier never reads the source tree, the test suite, or the builder's self-report; its only inputs are the chain and the live URL, which is what makes the verdict independent. Both surfaces of the §6 contract are served by one engine: the build-side finalise gate (invoked as a fresh subprocess by `rcf finalise`) and the operator-invoked CLI.
+- **Runtime-profile model**: verdicts carry the runtime they ran against (`deployed` / `ci` / `local-dev`); a SHIP verdict is only issued from a `deployed` or declared-parity environment.
+- **Shared isolation env**: spawned under `@stravica-ai/rcf-lite-core`'s §7.3 isolation recipe so the verifier agent starts cold with zero build context.
+
+### Fixed
+
+- **Default-launcher ship-blockers** ([#49](https://github.com/Stravica/rcf-lite/pull/49)): network permissions for the launched verifier, more robust report ingestion, and a structured `LAUNCH-FAILURE` report when the instance under test cannot be reached — the launch path no longer fails silently or ambiguously.
