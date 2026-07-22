@@ -4,11 +4,25 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, breaking changes are signalled by a minor version bump.
 
-## Unreleased
+## [0.3.0] - 2026-07-22
+
+Deploy-aware, runtime-honest build guidance (Tier-1 hardening, REQ-008) plus the `rcf finalise` ship gate that hands the final verdict to an independent `rcf-verify` run. First release published from the `Stravica/rcf-lite` monorepo, and the first release to depend on the extracted `@stravica-ai/rcf-lite-core` package.
+
+### Added
+
+- **`rcf finalise <fbs-id> --url <deploy-url>` — the finalise gate** ([#50](https://github.com/Stravica/rcf-lite/pull/50)): promotes an FBS from `complete` to `verified` only when an independent `rcf-verify` run against the deployed app passes. `rcf-verify` is spawned as a **fresh OS subprocess** (never imported in-process) under `@stravica-ai/rcf-lite-core`'s isolation env (§7.3), so the verifier agent starts cold with zero build context. Exit code is the gate (0 → promote, non-zero → FBS left unchanged and findings surfaced); findings flow via a chain-node-addressed `--out` report file, not stdout scraping. Install-together posture (§8.3): if `rcf-verify` is absent, `finalise` prompts to install it on an interactive TTY or accepts an explicit `--install-verify` flag off a TTY — it never silently skips the gate and never silently auto-installs.
+
+### Changed
+
+- **Tier-1 hardening — deploy-aware, runtime-honest build guidance** ([#42](https://github.com/Stravica/rcf-lite/pull/42), REQ-008): closes the persona-programme root cause where the deploy runtime was absent from the tool's elicitation and verification loop. Elicitation now establishes the deploy target early (before any stack is committed), constrains the stack to what the target can host, captures the choice as an ADR, and includes a jargon-free hosting-choice walkthrough with honest account-holder-step isolation. The build cycle makes a working **local preview** the hosting-independent definition-of-done, requires **runtime-provenance labels** on every verified/tested claim (Cloudflare and non-Cloudflare worked examples, aligned with the deployed/ci/local-dev profile model), and adds an interim fresh-context self-review scoped honestly away from the independent gate. `harness-template.md` gains hard fragment RULE 5 (no stack before deploy target), RULE 6 (every build lands a local preview) and RULE 7 (verification claims name their runtime). Guidance, spec (US-801..805, 20 ACs, ADR-006..009, FBS-013/014) and drift-test changes only — no runtime CLI behaviour change.
 
 ### Repository
 
 - **Repo renamed `rcf-build-lite` → `rcf-lite` (2026-07-21).** The GitHub repository was renamed and restructured into a pnpm-workspace monorepo, with this package relocated to `packages/build/`. The **published package name is unchanged** — it remains `@stravica-ai/rcf-build-lite` — and its npm provenance / trusted-publisher binding are preserved. Old `Stravica/rcf-build-lite` URLs redirect to `Stravica/rcf-lite` indefinitely; do not re-create a repo at the old name.
+
+### Dependencies
+
+- Now depends on **`@stravica-ai/rcf-lite-core`** (first published at `0.1.0` alongside this release) for the shared RCF-chain store, `RcfError` type, MCP protocol shell, and verifier isolation env. Previously-bundled internals were extracted into that package; consumers install it transitively.
 
 ## [0.2.1] - 2026-07-18
 
