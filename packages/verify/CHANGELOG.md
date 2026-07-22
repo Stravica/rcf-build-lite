@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, breaking changes are signalled by a minor version bump.
 
+## [0.1.1] - 2026-07-22
+
+Documentation-only release. No code, CLI, contract or dependency changes.
+
+### Documentation
+
+- **README consumability pass + reference doc** ([#52](https://github.com/Stravica/rcf-lite/pull/52)): the verify README was rewritten for a consumer landing on the npm package page cold — what the verifier is, how it is invoked (both the `rcf finalise` finalise-gate path and the operator CLI), and the runtime-profile / ship-authority model. Adds `docs/reference.md` as the full flag-and-exit-code reference.
+
 ## [0.1.0] - 2026-07-22
 
 First publish. `rcf-verify-lite` v1 — a fresh-context adversarial verifier for the RCF Lite suite.

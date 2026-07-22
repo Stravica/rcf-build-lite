@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, breaking changes are signalled by a minor version bump.
 
+## [0.4.0] - 2026-07-22
+
+Hardens the `verified` state so it can only be reached through the independent ship gate. Two changes close bypasses that let a builder write `verified` without a passing, ship-authoritative `rcf-verify` run, plus one documented contract-field rename. No new features; behaviour and one JSON contract key change, so this is a minor bump under the pre-1.0 breaking-is-minor convention.
+
+### Changed
+
+- **`rcf build <fbs-id> --mark verified` is now refused** ([#53](https://github.com/Stravica/rcf-lite/pull/53)): the `--mark` ladder caps at `complete`. Previously any forward lifecycle jump was legal, so `--mark verified` promoted `complete → verified` with no verify run at all — a one-flag bypass of the finalise gate's independence guarantee (spec §9). `--mark verified` now exits 4 (the mark-refusal family), writes nothing, and points to `rcf finalise`. `verified` is written only by the finalise gate, or by the sanctioned explicit override `rcf update <fbs-id> --set executionStatus=verified` (unchanged). **Migration:** anywhere you scripted `rcf build <id> --mark verified`, switch to `rcf finalise <id> --url <deploy-url>` (the ship gate) or, for a deliberate manual override with no verify run, `rcf update <id> --set executionStatus=verified`.
+- **`rcf finalise` now gates on ship authority, not just exit code** ([#53](https://github.com/Stravica/rcf-lite/pull/53)): promotion to `verified` previously required only that the spawned `rcf-verify` subprocess exit 0, so a correctness-only pass (e.g. a bare `--profile ci` run) could write `verified`. Promotion now additionally requires the ingested report's `verdictAuthority === 'ship'` (spec §4) — a `deployed`-profile run, or a `ci`/`local-dev` run with `--parity-env`. A passing non-ship run, or an unreadable report on a pass, produces a clean explicit **HOLD** (state unchanged, exit 4), never a silent promotion and never an error. Re-verify of an already-verified item is unchanged.
+- **`completionContract.markVerified` renamed to `completionContract.finalise`** ([#53](https://github.com/Stravica/rcf-lite/pull/53)): the JSON build bundle (`rcf build --format json`) and the MCP `rcf_build` result emit a `completionContract` object. Its `markVerified` key — which carried a `rcf build … --mark verified` command that is now refused — is renamed to `finalise` and carries `rcf finalise <id> --url <deploy-url>`. **This is a breaking change for any consumer that reads `completionContract.markVerified` from the JSON/MCP output** (the MCP `BUILD_OUTPUT_SCHEMA` `required` list changed to match). Read `completionContract.finalise` instead. The Stage-5 markdown runbook and the guidance pack (`build-cycle.md`, `build-cycle-playbook.md`, `getting-started.md`) are reworded to route ship through `rcf finalise`.
+
+### Documentation
+
+- **README consumability pass** ([#52](https://github.com/Stravica/rcf-lite/pull/52)): the build README was rewritten for a consumer landing on the npm package page cold — what the package is, install, first commands, and where the docs live.
+
 ## [0.3.0] - 2026-07-22
 
 Deploy-aware, runtime-honest build guidance (Tier-1 hardening, REQ-008) plus the `rcf finalise` ship gate that hands the final verdict to an independent `rcf-verify` run. First release published from the `Stravica/rcf-lite` monorepo, and the first release to depend on the extracted `@stravica-ai/rcf-lite-core` package.
@@ -70,6 +84,8 @@ First public release.
 - `rcf mcp`: MCP server exposing the toolset to coding agents, backed by the agent guidance pack in `guidance/`.
 - Documentation set: install, getting started, how it works, and why it exists, under `docs/`.
 
+[0.4.0]: https://github.com/Stravica/rcf-lite/releases/tag/build-v0.4.0
+[0.3.0]: https://github.com/Stravica/rcf-lite/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Stravica/rcf-build-lite/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Stravica/rcf-build-lite/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Stravica/rcf-build-lite/releases/tag/v0.1.0
